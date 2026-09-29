@@ -79,6 +79,11 @@ def main() -> None:
         # guest home files (skills, instructions): "@home/" maps to the guest's
         # /root, which is a bind mount the rootfs cannot reach.
         written += add_tree(archive, root / "payload" / "home", "@home")
+        # ...and the plugin a second time, at the path the *profile* resolves it
+        # from. The app can write there directly (same filesystem, no PRoot), so
+        # a plugin update no longer depends on the guest-side copy step.
+        written += add_tree(archive, root / "plugin" / "dsh-plugin-android",
+                            "@home/.dsh/profiles/web/node_modules/dsh-plugin-android")
         written += add_tree(archive, root / "plugin" / "dsh-plugin-android", "opt/dsh/dsh-plugin-android")
     # Stamp the package so a receiver can tell whether it is newer than what it
     # already applied. Written last, so its hash covers the payload files too.

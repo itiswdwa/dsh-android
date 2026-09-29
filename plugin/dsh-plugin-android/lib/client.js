@@ -46,9 +46,12 @@ window.__ModuleLoader__.load({
 			mountRestart: "重启服务以生效",
 			mountRestarted: "已请求重启，几秒后再看沙箱里的目录",
 			export: "导出",
+			verLine: "应用 %s · 热包 %s · %s",
 			hotTitle: "热更新包",
 			hotCurrent: "当前：内置 %s",
 			hotApplied: "已导入外部包 %s",
+			hotBakedIn: "内置热包",
+			hotImported: "已导入外部热包",
 			hotHint: "收到 dsh-hot.zip 后放进手机的 Download 目录，重新打开应用即可导入（插件、技能、沙箱脚本都能这样更新，不必重装 APK）。",
 			updCheck: "检查更新",
 			updChecking: "检查中…",
@@ -128,9 +131,12 @@ window.__ModuleLoader__.load({
 			mountRestart: "Restart the server to apply",
 			mountRestarted: "Restart requested; check the directory in a few seconds",
 			export: "Export",
+			verLine: "app %s · hot %s · %s",
 			hotTitle: "Hot package",
 			hotCurrent: "packaged %s",
 			hotApplied: "imported %s",
+			hotBakedIn: "baked-in",
+			hotImported: "imported",
 			hotHint: "Drop a received dsh-hot.zip into the phone's Download folder and reopen the app to apply it. Plugins, skills and sandbox scripts update this way — no APK reinstall.",
 			updCheck: "Check for updates",
 			updChecking: "Checking…",
@@ -721,8 +727,18 @@ window.__ModuleLoader__.load({
 				}
 			};
 
+			const hotState = (props.applied ?? "") === "" ? t("hotBakedIn") : t("hotImported");
 			return h("div", { style: { padding: "0 0 24px" } },
 				h("div", { style: S.h }, t("title")),
+				// Which build is this? Without it, an older plugin on a device is
+				// indistinguishable from a feature that was never written.
+				h("div", {
+					style: { fontSize: 11, marginBottom: 6, color: "var(--dsw-alias-label-tertiary, #888)" },
+					"data-dsh-android-version": (snapshot.appVersion ?? "") + "/" + (snapshot.hotVersion || snapshot.packagedHotVersion || "")
+				}, t("verLine")
+					.replace("%s", snapshot.appVersion ?? "?")
+					.replace("%s", String(snapshot.hotVersion || snapshot.packagedHotVersion || "-").slice(0, 8))
+					.replace("%s", hotState)),
 				h("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary, #666)", marginBottom: 12 } }, t("subtitle")),
 
 				h(StatusCard, { status: snapshot.status, t, act, message }),

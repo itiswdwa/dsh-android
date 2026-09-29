@@ -54,11 +54,15 @@ fi
 rm -f "$DSH_HOME"/.l2s.* 2>/dev/null || true
 find "$DSH_HOME" -maxdepth 3 -name '.l2s.*' -delete 2>/dev/null || true
 
+# Refresh the plugin the profile resolves. The app writes this same path
+# directly from the hot overlay; this copy covers the case where the guest
+# boots without the app having run (fresh profile, manual start).
 if [ -d "$DSH_INSTALL/dsh-plugin-android" ] && [ -d "$DSH_HOME/.dsh/profiles/web" ]; then
   target="$DSH_HOME/.dsh/profiles/web/node_modules/dsh-plugin-android"
-  rm -rf "$target"
-  mkdir -p "$(dirname "$target")"
-  cp -a "$DSH_INSTALL/dsh-plugin-android" "$target"
+  if [ ! -d "$target" ]; then
+    mkdir -p "$(dirname "$target")"
+    cp -a "$DSH_INSTALL/dsh-plugin-android" "$target"
+  fi
 fi
 
 if [ -n "${DSH_PTY_TOKEN:-}" ]; then
