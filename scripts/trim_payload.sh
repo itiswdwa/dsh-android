@@ -24,7 +24,10 @@ find "$NM" -type d -name 'coverage' -prune -exec rm -rf {} +
 find "$NM" -type d -name 'docs' -prune -exec rm -rf {} +
 find "$NM" -type d -name 'examples' -prune -exec rm -rf {} +
 find "$NM" -type d -name '.github' -prune -exec rm -rf {} +
-find "$NM" -name '*.md' -not -name 'LICENSE*' -delete
+# Skill packages are *markdown*: SKILL.md and references/*.md are the content,
+# not documentation. Deleting them leaves the skill tool working but finding
+# nothing, with no error anywhere to explain it.
+find "$NM" -name '*.md' -not -name 'LICENSE*' -not -path '*/skills/*' -delete
 find "$NM" -name '*.markdown' -delete
 
 # --- foreign-platform binaries --------------------------------------------

@@ -27,6 +27,9 @@ cp -a "$ROOT/payload/." "$ROOTFS/"
 chmod +x "$ROOTFS/opt/dsh/android/start-dsh.sh" "$ROOTFS/usr/local/bin/shiz"
 chmod 755 "$ROOTFS/opt/dsh/android"
 
+echo "== guest home (skills, instructions) =="
+[ -d "$ROOT/payload/home" ] && cp -a "$ROOT/payload/home/." "$ROOTFS/opt/dsh/dsh-home-seed/"
+
 echo "== plugin =="
 rm -rf "$ROOTFS/opt/dsh/dsh-plugin-android"
 cp -a "$ROOT/plugin/dsh-plugin-android" "$ROOTFS/opt/dsh/dsh-plugin-android"
