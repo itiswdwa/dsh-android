@@ -74,6 +74,15 @@ shiz --status          # installed=true granted=true version=13
 - 用户让你装的 APK 才装。
 - 需要 root 的命令会失败 —— 直接说明，不要反复重试。
 
+## 常犯的错
+
+- 把 guest 路径当 Android 路径用。`/root/1/note.md` 是沙箱里的文件，`shiz` 看不到它；
+  先 `cp` 到 `/sdcard/...` 再交给 `shiz`。
+- `input text` 里的空格要写 `%s`，中文和特殊字符要先转义；能不用 UI 输入就别用。
+- 拿 `pm install` 装 `/sdcard` 上的 APK 时忘了 `-r`，覆盖安装会失败。
+- 以为可以 `su`。不行，这里没有 root，需要 root 的命令直接说明做不了。
+- 跑交互式命令（`top`、`vim`、`adb shell` 之类）。`shiz` 不是终端，一次一条、跑完返回。
+
 ## 边界
 
 - 每条命令 20 秒超时；长任务重定向到文件里再读。
