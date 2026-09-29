@@ -42,6 +42,9 @@ window.__ModuleLoader__.load({
 			mountEmpty: "还没有挂载。选一个文件夹，agent 和终端就能直接读写它。",
 			mountMissing: "（路径已不存在）",
 			mountApply: "重启服务使其生效",
+			mountTest: "测一下",
+			mountRestart: "重启服务以生效",
+			mountRestarted: "已请求重启，几秒后再看沙箱里的目录",
 			export: "导出",
 			hotTitle: "热更新包",
 			hotCurrent: "当前：内置 %s",
@@ -121,6 +124,9 @@ window.__ModuleLoader__.load({
 			mountEmpty: "No mounts yet. Pick a folder and the agent and terminal can read and write it directly.",
 			mountMissing: "(path no longer exists)",
 			mountApply: "Restart the server to apply",
+			mountTest: "Test",
+			mountRestart: "Restart the server to apply",
+			mountRestarted: "Restart requested; check the directory in a few seconds",
 			export: "Export",
 			hotTitle: "Hot package",
 			hotCurrent: "packaged %s",
@@ -355,6 +361,7 @@ window.__ModuleLoader__.load({
 			const [host, setHost] = react.useState("");
 			const [guest, setGuest] = react.useState("");
 			const [message, setMessage] = react.useState("");
+			const [output, setOutput] = react.useState("");
 			const act = async (path, body) => {
 				try {
 					const result = await call(path, body);
@@ -373,14 +380,35 @@ window.__ModuleLoader__.load({
 					},
 						h("div", { style: S.row },
 							h("strong", { style: { fontSize: 13 } }, mount.guest),
-							mount.exists === true ? null : h("span", { style: { fontSize: 11, color: "#d29922" } }, t("mountMissing")),
 							h("span", { style: { flex: 1 } }),
+							h(Button, {
+								onClick: async () => {
+									setMessage(t("busy"));
+									try {
+										const result = await call("/mounts/test", { id: mount.id });
+										setMessage("");
+										setOutput("$ ls -la " + mount.guest + "\n" + (result.output ?? "")
+											+ (result.problem ? "\n⚠ " + result.problem : ""));
+									} catch (error) {
+										setMessage(String(error.message ?? error));
+									}
+								}
+							}, t("mountTest")),
 							h(Button, {
 								onClick: () => act("/mounts/toggle", { id: mount.id, enabled: mount.enabled !== true })
 							}, mount.enabled === true ? "停用" : "启用"),
 							h(Button, { onClick: () => act("/mounts/remove", { id: mount.id }) }, t("remove"))
 						),
-						h("div", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary, #666)", marginTop: 4, wordBreak: "break-all" } }, mount.host)
+						h("div", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary, #666)", marginTop: 4, wordBreak: "break-all" } }, mount.host),
+						// Why this mount will show nothing, in the user's terms. The
+						// app used to drop unreadable paths from the PRoot command
+						// line, which looked exactly like the feature being broken.
+						mount.problem
+							? h("div", { style: { fontSize: 11, marginTop: 4, color: "#d29922" } }, "⚠ " + mount.problem)
+							: null,
+						mount.enabled !== true
+							? h("div", { style: { fontSize: 11, marginTop: 4, color: "var(--dsw-alias-label-tertiary, #888)" } }, "已停用")
+							: null
 					)),
 				h("div", { style: S.row },
 					h(Button, { kind: "primary", onClick: () => act("/mounts/pick", {}) }, t("mountPick"))
@@ -402,6 +430,12 @@ window.__ModuleLoader__.load({
 					h(Button, { onClick: () => act("/mounts/add", { host, guest }) }, t("mountAdd"))
 				),
 				message !== "" ? h("div", { style: { fontSize: 12, marginTop: 8, color: "var(--dsw-alias-label-secondary, #666)" } }, message) : null,
+				output !== ""
+					? h("pre", { style: Object.assign({}, S.mono, { marginTop: 8, maxHeight: 160 }) }, output)
+					: null,
+				h("div", { style: S.row },
+					h(Button, { kind: "primary", onClick: () => act("/server/restart", {}) }, t("mountRestart"))
+				),
 				h("div", { style: { fontSize: 11, marginTop: 6, color: "var(--dsw-alias-label-tertiary, #888)" } }, t("mountHint"))
 			);
 		}

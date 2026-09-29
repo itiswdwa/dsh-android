@@ -220,6 +220,38 @@ public final class BridgeServer {
             case "/export/recent":
                 respondJson(out, 200, Exports.recent());
                 return;
+            case "/mounts/test": {
+                String id = request.optString("id", "");
+                for (Mounts.Mount mount : Mounts.list()) {
+                    if (!mount.id.equals(id)) continue;
+                    JSONObject answer = new JSONObject();
+                    try {
+                        answer.put("ok", true);
+                        answer.put("problem", mount.problem());
+                        answer.put("host", mount.host);
+                        answer.put("guest", mount.guest);
+                        // Ask the guest itself: the only way to tell a bind that
+                        // worked from one that produced an empty directory.
+                        String script = "ls -la -- " + shellQuote(mount.guest)
+                                + " 2>&1 | head -20; echo '---'; "
+                                + "mount | grep -F -- " + shellQuote(mount.guest) + " || true";
+                        Proot.Result result = Proot.exec(App.i(),
+                                java.util.Collections.emptyList(), script, 30000);
+                        answer.put("output", result.stdout.trim());
+                        answer.put("exit", result.exitCode);
+                    } catch (Throwable error) {
+                        try {
+                            answer.put("ok", false);
+                            answer.put("error", String.valueOf(error.getMessage()));
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                    respondJson(out, 200, answer);
+                    return;
+                }
+                respondJson(out, 404, error("没有这条挂载"));
+                return;
+            }
             case "/mounts/add": {
                 Mounts.Mount added = Mounts.add(request.optString("host", ""),
                         request.optString("guest", ""));
@@ -401,6 +433,11 @@ public final class BridgeServer {
     }
 
     // ------------------------------------------------------------------ plumbing
+
+    /** Single-quote for the guest shell: the path comes from the UI. */
+    private static String shellQuote(String value) {
+        return "'" + (value == null ? "" : value.replace("'", "'\\''")) + "'";
+    }
 
     private static JSONObject ok(String message) {
         JSONObject object = new JSONObject();

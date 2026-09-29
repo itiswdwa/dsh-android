@@ -38,14 +38,42 @@ public final class Mounts {
         public JSONObject toJson() {
             JSONObject object = new JSONObject();
             try {
+                File source = new File(host);
                 object.put("id", id);
                 object.put("host", host);
                 object.put("guest", guest);
                 object.put("enabled", enabled);
-                object.put("exists", new File(host).isDirectory());
+                object.put("exists", source.isDirectory());
+                object.put("readable", source.isDirectory() && source.canRead());
+                object.put("problem", problem());
             } catch (Throwable ignored) {
             }
             return object;
+        }
+
+        /**
+         * Why this mount will not show anything, in the user's terms.
+         *
+         * Silence was the original bug here: a path the app cannot stat was
+         * dropped from the PRoot command line, and the guest simply showed an
+         * empty directory with nothing anywhere to explain it.
+         */
+        public String problem() {
+            File source = new File(host);
+            if (!source.isDirectory()) {
+                return "路径不存在或不可访问（可能没授予存储权限）";
+            }
+            if (!source.canRead()) {
+                return "应用没有读取权限";
+            }
+            if (host.contains("/Android/data/") || host.contains("/Android/obb/")) {
+                return "Android 11+ 不允许应用访问 Android/data 与 Android/obb";
+            }
+            if (host.startsWith("/storage/") && !host.startsWith("/storage/emulated/0")
+                    && !host.startsWith("/storage/self/")) {
+                return "可移动存储（SD 卡/U 盘）需要额外授权，建议先拷到内部存储";
+            }
+            return "";
         }
     }
 
@@ -151,10 +179,18 @@ public final class Mounts {
         save(updated);
     }
 
+    /**
+     * Every enabled mount, readable or not.
+     *
+     * Readability is deliberately not a filter: PRoot binds by path, and a bind
+     * that yields an empty directory is a diagnosable state (the UI shows the
+     * reason and the terminal can be asked), whereas a silently dropped bind
+     * looks like the feature is broken.
+     */
     public static List<Mount> enabled() {
         List<Mount> out = new ArrayList<>();
         for (Mount mount : list()) {
-            if (mount.enabled && new File(mount.host).isDirectory()) out.add(mount);
+            if (mount.enabled) out.add(mount);
         }
         return out;
     }
