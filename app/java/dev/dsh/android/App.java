@@ -78,22 +78,53 @@ public final class App extends Application {
     }
 
     /**
-     * The bundled distro was Alpine before it was Ubuntu. Its tree is ~400 MB and
-     * its profile id is gone, so drop it rather than leave it orphaned beside the
-     * new payload; a user who was running it falls back to the bundled distro.
+     * The bundled distro was Alpine before it was Ubuntu, so its ~400 MB tree is
+     * dropped once rather than left orphaned beside the new payload.
+     *
+     * Two rules learned the hard way, both about not doing this on the main
+     * thread inside Application.onCreate:
+     *
+     *   once      a tree that cannot be fully deleted (PRoot's --link2symlink
+     *             leftovers refuse to unlink) would otherwise be walked again on
+     *             every single launch.
+     *   off-thread  that walk is tens of thousands of files. Inline, it blocked
+     *             startup before the bridge bound its port or the sandbox began
+     *             to boot — the app looked dead with no crash to show for it.
      */
     private void migrateLegacyDistro() {
-        File legacy = new File(distrosDir, "alpine");
-        if (BUNDLED_ID.equals("alpine") || !legacy.isDirectory()) return;
-        Payload.deleteTree(legacy);
-        SharedPreferences.Editor editor = prefs.edit()
+        final File legacy = new File(distrosDir, "alpine");
+        if (BUNDLED_ID.equals("alpine")) return;
+        final SharedPreferences.Editor editor = prefs.edit()
                 .remove("cmd.alpine")
                 .remove("name.alpine");
         if ("alpine".equals(prefs.getString("distro", BUNDLED_ID))) {
             editor.remove("distro");
         }
         editor.apply();
-        android.util.Log.i("dsh", "removed legacy alpine distro");
+        if (prefs.getBoolean("legacyCleanupDone", false)) return;
+        if (!legacy.exists()) {
+            prefs.edit().putBoolean("legacyCleanupDone", true).apply();
+            return;
+        }
+        prefs.edit().putBoolean("legacyCleanupDone", true).apply();
+        Thread cleanup = new Thread(() -> {
+            Payload.deleteTree(legacy);
+            if (legacy.exists()) {
+                // Some entries cannot be unlinked at all; moving the directory
+                // aside is enough to stop it being in the way, and it costs one
+                // rename instead of another full walk.
+                File orphan = new File(distrosDir, "alpine.orphan");
+                if (legacy.renameTo(orphan)) {
+                    android.util.Log.i("dsh", "legacy alpine tree moved to " + orphan.getName());
+                } else {
+                    android.util.Log.w("dsh", "legacy alpine tree could not be removed");
+                }
+            } else {
+                android.util.Log.i("dsh", "legacy alpine tree removed");
+            }
+        }, "legacy-cleanup");
+        cleanup.setPriority(Thread.MIN_PRIORITY);
+        cleanup.start();
     }
 
     /** Shell version (the APK), for the update card and the bridge snapshot. */

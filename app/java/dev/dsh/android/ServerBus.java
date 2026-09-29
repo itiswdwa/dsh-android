@@ -141,11 +141,11 @@ public final class ServerBus {
         builder.redirectErrorStream(true);
         builder.directory(app.distroDir);
         Mounts.ensureGuestDirs(distro.root);
-        for (Mounts.Mount mount : Mounts.enabled()) {
+        for (Mounts.Mount mount : Mounts.configured()) {
             String problem = mount.problem();
             App.log(problem.isEmpty()
                     ? "mount: " + mount.host + " -> " + mount.guest
-                    : "mount: " + mount.host + " -> " + mount.guest + " 有问题：" + problem);
+                    : "mount: 跳过 " + mount.host + " -> " + mount.guest + "：" + problem);
         }
         java.util.Map<String, String> env = builder.environment();
         env.put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");

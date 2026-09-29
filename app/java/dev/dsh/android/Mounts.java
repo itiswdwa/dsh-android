@@ -180,14 +180,29 @@ public final class Mounts {
     }
 
     /**
-     * Every enabled mount, readable or not.
+     * Mounts that can actually be bound, i.e. whose source path exists.
      *
-     * Readability is deliberately not a filter: PRoot binds by path, and a bind
-     * that yields an empty directory is a diagnosable state (the UI shows the
-     * reason and the terminal can be asked), whereas a silently dropped bind
-     * looks like the feature is broken.
+     * Two different failures, two different answers, and getting them mixed up
+     * cost a boot:
+     *
+     *   missing source   PRoot's -b is fatal on a path it cannot find, so this
+     *                    must be filtered out — but never silently (see
+     *                    {@link Mount#problem()} and the settings page, which
+     *                    say which path and why).
+     *   present but
+     *   unreadable       bind anyway: the guest gets an empty directory, which
+     *                    is diagnosable, instead of the whole sandbox failing.
      */
     public static List<Mount> enabled() {
+        List<Mount> out = new ArrayList<>();
+        for (Mount mount : list()) {
+            if (mount.enabled && new File(mount.host).isDirectory()) out.add(mount);
+        }
+        return out;
+    }
+
+    /** Every mount the user turned on, bindable or not, for reporting. */
+    public static List<Mount> configured() {
         List<Mount> out = new ArrayList<>();
         for (Mount mount : list()) {
             if (mount.enabled) out.add(mount);
