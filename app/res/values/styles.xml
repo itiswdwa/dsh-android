@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Dark from the very first frame: windowBackground paints before the
+      activity's own views exist, so it is what the user sees while the sandbox
+      boots. The system bars match, otherwise the light bar strip above and
+      below the dark content reads as another flash.
+    -->
+    <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/boot_background</item>
+        <item name="android:colorBackground">@color/boot_background</item>
+        <item name="android:statusBarColor">@color/boot_background</item>
+        <item name="android:navigationBarColor">@color/boot_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

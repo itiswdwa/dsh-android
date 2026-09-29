@@ -1,0 +1,28 @@
+# 构建产物与本地状态（不提交）
+build/
+out/
+lab/
+
+# 签名密钥：这是应用的身份，泄露等于别人可以署你的名字发更新
+keystore/
+*.p12
+*.jks
+*.keystore
+
+# 载荷与二进制
+*.apk
+*.aab
+*.zip
+!hot.zip
+
+# 生成文件
+app/java/dev/dsh/android/BuildInfo.java
+app/res/mipmap-*/
+app/res/drawable/ic_whale_monochrome.xml
+app/res/values/icon_background.xml
+app/res/values-night/icon_background.xml
+
+# 依赖与临时物
+node_modules/
+*.log
+.DS_Store

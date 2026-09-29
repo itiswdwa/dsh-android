@@ -1,0 +1,24 @@
+{
+  "name": "dsh-plugin-android",
+  "version": "1.0.0",
+  "description": "Android sandbox surface prompt and control panel for the DeepSeek Harness Web UI",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "license": "MIT"
+}

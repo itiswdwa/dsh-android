@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""Render the launcher icon from the harness's own whale mark.
+
+Source of truth is the brand artwork the harness ships (dist/favicon.svg, copied
+here as whale.svg), so the icon is the official mark rather than something
+approximated by hand. Colours come from the harness palette too:
+--dsw-static-deepseek-500 is #4176e6, the blue its own primary actions use.
+
+Outputs, per density:
+  mipmap-*/ic_launcher.png             legacy composited icon (rounded square)
+  mipmap-*/ic_launcher_foreground.png  adaptive foreground (whale in the safe zone)
+  mipmap-anydpi-v26/ic_launcher.xml    adaptive icon binding the two
+  values/icon_background.xml            the background colour it references
+
+Requires rsvg-convert (librsvg) for the SVG rasterisation step.
+"""
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+from PIL import Image
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+APP = ROOT / "app"
+SVG = ROOT / "assets" / "whale.svg"
+OUT_RES = APP / "res"
+
+# The icon is monochrome and *inverts with the system*: light mode shows a dark
+# whale on white, dark mode a white whale on near-black. Both come from the same
+# artwork, and -night resource qualifiers are what makes the system pick one.
+INK = (0x0B, 0x0E, 0x14)            # the app's dark surface
+PAPER = (0xFF, 0xFF, 0xFF)
+SUPERSAMPLE = 4
+
+LEGACY = {"mipmap-mdpi": 48, "mipmap-hdpi": 72, "mipmap-xhdpi": 96,
+          "mipmap-xxhdpi": 144, "mipmap-xxxhdpi": 192}
+FOREGROUND = {"mipmap-mdpi": 108, "mipmap-hdpi": 162, "mipmap-xhdpi": 216,
+              "mipmap-xxhdpi": 324, "mipmap-xxxhdpi": 432}
+
+
+def rasterise(size: int, colour: tuple[int, int, int]) -> Image.Image:
+    """Whale silhouette in one colour, on transparency."""
+    tmp = Path("/tmp/_whale_master.png")
+    subprocess.run(["rsvg-convert", "-w", str(size), "-h", str(size), str(SVG), "-o", str(tmp)],
+                   check=True)
+    source = Image.open(tmp).convert("RGBA")
+    # The artwork is a black silhouette whose shape lives in the alpha channel:
+    # recolour it and keep the alpha for anti-aliasing.
+    tinted = Image.new("RGBA", source.size, colour + (0,))
+    tinted.putalpha(source.getchannel("A"))
+    return tinted
+
+
+def background(size: int, colour: tuple[int, int, int]) -> Image.Image:
+    return Image.new("RGBA", (size, size), colour + (255,))
+
+
+def rounded_mask(size: int, radius_ratio: float = 0.22) -> Image.Image:
+    mask = Image.new("L", (size, size), 0)
+    from PIL import ImageDraw
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, size - 1, size - 1],
+                                           radius=int(size * radius_ratio), fill=255)
+    return mask
+
+
+def compose_legacy(size: int, whale: Image.Image, background_colour) -> Image.Image:
+    big = size * SUPERSAMPLE
+    base = background(big, background_colour)
+    # The mark reads best a little above centre; 62% of the tile keeps the fins
+    # clear of the rounded corners.
+    side = int(big * 0.62)
+    mark = whale.resize((side, side), Image.LANCZOS)
+    base.alpha_composite(mark, ((big - side) // 2, int(big * 0.19)))
+    base.putalpha(rounded_mask(big))
+    return base.resize((size, size), Image.LANCZOS)
+
+
+def compose_foreground(size: int, whale: Image.Image) -> Image.Image:
+    """Adaptive foreground: only the mark, sized into the 66dp safe zone."""
+    big = size * SUPERSAMPLE
+    canvas = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    side = int(big * 0.52)          # ~56 of 108dp, inside the safe circle
+    mark = whale.resize((side, side), Image.LANCZOS)
+    canvas.alpha_composite(mark, ((big - side) // 2, (big - side) // 2))
+    return canvas.resize((size, size), Image.LANCZOS)
+
+
+def write_monochrome_vector() -> None:
+    """Emit res/drawable/ic_whale_monochrome.xml from the brand SVG."""
+    source = SVG.read_text(encoding="utf-8")
+    view_box = re.search(r'viewBox="([^"]+)"', source)
+    path_data = re.search(r'\bd="([^"]+)"', source)
+    fill_rule = re.search(r'fill-rule="([^"]+)"', source)
+    if view_box is None or path_data is None:
+        sys.exit("whale.svg has no viewBox or path data")
+    width, height = (view_box.group(1).split())[2:4]
+    fill_type = "evenOdd" if (fill_rule and fill_rule.group(1) == "evenodd") else "nonZero"
+    target = OUT_RES / "drawable"
+    target.mkdir(parents=True, exist_ok=True)
+    # Adaptive layers are drawn into a 108dp canvas whose visible area is the
+    # central 66dp; artwork that fills the canvas gets its fins clipped by the
+    # launcher mask. The artwork is in a 50-unit viewBox, so the group scales it
+    # to ~56 units and centres it: 26 + 1.12 * p maps 0..50 onto 26..82 of 108.
+    canvas = 108.0
+    art = float(width)
+    visible = canvas * 0.52
+    scale = visible / art
+    offset = (canvas - visible) / 2.0
+    (target / "ic_whale_monochrome.xml").write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        "<!-- Generated by scripts/render_icon.py from assets/whale.svg (the harness\n"
+        "     brand mark). White so the system can tint it, and no background layer,\n"
+        "     so a themed icon is the whale itself rather than a filled square. -->\n"
+        '<vector xmlns:android="http://schemas.android.com/apk/res/android"\n'
+        f'    android:width="{int(canvas)}dp"\n'
+        f'    android:height="{int(canvas)}dp"\n'
+        f'    android:viewportWidth="{canvas}"\n'
+        f'    android:viewportHeight="{canvas}">\n'
+        f'    <group android:scaleX="{scale:.4f}" android:scaleY="{scale:.4f}"\n'
+        f'        android:translateX="{offset:.2f}" android:translateY="{offset:.2f}">\n'
+        '        <path\n'
+        f'            android:pathData="{path_data.group(1)}"\n'
+        f'            android:fillType="{fill_type}"\n'
+        '            android:fillColor="#FFFFFFFF" />\n'
+        "    </group>\n"
+        "</vector>\n",
+        encoding="utf-8",
+    )
+    print("monochrome vector written: drawable/ic_whale_monochrome.xml")
+
+
+def main() -> None:
+    if not SVG.is_file():
+        sys.exit(f"missing {SVG}")
+
+    # Two palettes: day = dark mark on light, night = light mark on dark. The
+    # switcher is the OS, through the -night qualifier on every resource that
+    # carries the difference (tile, adaptive foreground, adaptive background).
+    palettes = [("", PAPER, INK, PAPER), ("-night", INK, PAPER, INK)]
+
+    for suffix, tile, mark, adaptive_background in palettes:
+        master = rasterise(1024, mark)
+        for folder, size in LEGACY.items():
+            # Qualifier order is fixed: night comes before density, so
+            # mipmap-night-hdpi — never mipmap-hdpi-night.
+            target = OUT_RES / (folder.replace("mipmap-", "mipmap" + suffix + "-"))
+            target.mkdir(parents=True, exist_ok=True)
+            compose_legacy(size, master, tile).save(target / "ic_launcher.png")
+        for folder, size in FOREGROUND.items():
+            target = OUT_RES / (folder.replace("mipmap-", "mipmap" + suffix + "-"))
+            target.mkdir(parents=True, exist_ok=True)
+            compose_foreground(size, master).save(target / "ic_launcher_foreground.png")
+        values = OUT_RES / ("values" + suffix)
+        values.mkdir(parents=True, exist_ok=True)
+        (values / "icon_background.xml").write_text(
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            "<resources>\n"
+            f'    <color name="icon_background">#{adaptive_background[0]:02X}'
+            f'{adaptive_background[1]:02X}{adaptive_background[2]:02X}</color>\n'
+            "</resources>\n",
+            encoding="utf-8",
+        )
+
+    # Monochrome layer (Android 13+ themed icons): the whale alone, with no tile
+    # behind it, so the themed icon reads as the mark rather than a filled
+    # square. It is a vector: the system tints and scales it at whatever size the
+    # launcher wants, and one file covers every density.
+    write_monochrome_vector()
+
+    anydpi = OUT_RES / "mipmap-anydpi-v26"
+    anydpi.mkdir(parents=True, exist_ok=True)
+    (anydpi / "ic_launcher.xml").write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        "<!-- Generated by scripts/render_icon.py: the harness whale, inverting with the system theme. -->\n"
+        "<adaptive-icon xmlns:android=\"http://schemas.android.com/apk/res/android\">\n"
+        '    <background android:drawable="@color/icon_background" />\n'
+        '    <foreground android:drawable="@mipmap/ic_launcher_foreground" />\n'
+        '    <monochrome android:drawable="@drawable/ic_whale_monochrome" />\n'
+        "</adaptive-icon>\n",
+        encoding="utf-8",
+    )
+    compose_legacy(512, rasterise(1024, INK), PAPER).save(ROOT / "out" / "icon-day.png")
+    compose_legacy(512, rasterise(1024, PAPER), INK).save(ROOT / "out" / "icon-night.png")
+    print(f"icons rendered from {SVG.name}: day+night tiles and adaptive layers")
+
+
+if __name__ == "__main__":
+    main()

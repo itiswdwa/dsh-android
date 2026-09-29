@@ -1,0 +1,12 @@
+# Your patch layer for this dsh profile, applied after every bundle layer:
+# a top-level YAML array of loader patch entries (id-targeted config
+# overrides, disables, and insert lists; `!!js` expressions allowed).
+#
+# dsh-plugin-android is preinstalled with the app. It contributes two things:
+#   * a system-prompt section describing this session's real environment
+#     (phone, PRoot sandbox, /sdcard, the `shiz` privileged channel)
+#   * an "安卓沙箱" settings page and the terminal rail button
+# Remove this row to disable both; the plugin package stays on disk.
+- insert:
+    - id: android-sandbox
+      name: 'dsh-plugin-android'

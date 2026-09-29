@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Night palette: overrides values/colors.xml when the system is dark. -->
+    <color name="boot_background">#FF0E0F12</color>
+    <color name="console_background">#FF14161A</color>
+    <color name="console_card">#FF1E2128</color>
+    <color name="console_text">#FFE8EAED</color>
+    <color name="console_muted">#FF9AA0A6</color>
+    <color name="console_accent">#FF4C8DFF</color>
+    <color name="console_danger">#FFFF6B6B</color>
+    <color name="console_ok">#FF6BE07A</color>
+</resources>

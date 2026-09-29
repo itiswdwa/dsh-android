@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Day palette. Every native surface reads these, and values-night/ overrides
+      them, so the app follows the system light/dark setting exactly like the
+      harness UI it wraps. Hardcoding one of the two is how you get a dark flash
+      on a light phone (or the reverse).
+    -->
+    <color name="boot_background">#FFF7F8FA</color>
+    <color name="console_background">#FFF1F2F5</color>
+    <color name="console_card">#FFFFFFFF</color>
+    <color name="console_text">#FF1F2329</color>
+    <color name="console_muted">#FF6B7280</color>
+    <color name="console_accent">#FF2563EB</color>
+    <color name="console_danger">#FFD93025</color>
+    <color name="console_ok">#FF188038</color>
+</resources>

@@ -1,0 +1,247 @@
+/* ============================================================================
+ * DeepSeek Harness — Android / phone layout patch
+ * ----------------------------------------------------------------------------
+ * Upstream AppFrame owns three grid tracks (sidebar | center | rightbar) and
+ * solves them in JS (packages/client/ui-layout/src/client/columns.ts):
+ *
+ *   SIDEBAR_AUTO_COLLAPSE = 1024   -> below 1024px the sidebar falls back to a
+ *                                     56px icon rail, unless narrowExpanded
+ *   computeColumns(): sidebar = sidebar === 0 ? 56 : clamp(sidebar, 264, 420)
+ *
+ * So on a 412px phone the "expanded" sidebar still demands >=264px and the
+ * conversation column is crushed to ~148px — one glyph per line. This patch
+ * keeps upstream's JS state machine untouched and only reinterprets it for
+ * narrow viewports: the expanded sidebar becomes a full-screen drawer that
+ * overlays the frame instead of participating in the grid, so the center
+ * column keeps the whole viewport while the drawer is open.
+ *
+ * Class names are CSS-module hashes (e.g. pI_x6G_sidebarCol) and change on
+ * every upstream build, so every selector here matches on the *stable* part of
+ * the name ([class*="_sidebarCol"]) rather than the hash.
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+ * 0. WebView / touch baseline
+ * ------------------------------------------------------------------------ */
+
+html {
+  /* Android WebView applies font autosizing ("text inflation") to blocks it
+     thinks are articles; the harness owns its own type scale. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  /* Kill the iOS/Android long-press callout + tap highlight on chrome. */
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+@media (pointer: coarse) {
+  /* Fat scrollbars are desktop furniture on touch. */
+  * {
+    scrollbar-width: thin;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 1. Narrow viewport = phone / small tablet
+ * ------------------------------------------------------------------------ */
+@media (max-width: 1023px) {
+  /* --- 1a. Expanded sidebar becomes a full-screen drawer ----------------- */
+
+  /* The sidebar track collapses to zero width so the center column owns the
+     whole viewport; the drawer is painted out of flow by the rule below.
+     Both the drag handle and the right panel track are zeroed/removed: a
+     phone has no room for two side-by-side panels, and px-precise panel
+     dragging is a pointer device affordance. */
+  [class*="_frame"]:not([data-sidebar-collapsed]) {
+    grid-template-columns: 0 minmax(0, 1fr) 0 !important;
+  }
+
+  [class*="_frame"]:not([data-sidebar-collapsed]) > [class*="_sidebarCol"] {
+    position: fixed !important;
+    inset: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    z-index: 60;
+    border-right: 0 !important;
+    background: var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base, #fff));
+    box-shadow: none;
+    animation: dshm-drawer-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    /* The drawer owns the full viewport: keep its own content clear of the
+       gesture bar / notch. */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-sizing: border-box;
+  }
+
+  /* Taking the sidebar out of flow makes the grid auto-place the remaining
+     items one track to the left (center into the 0px track, right panel into
+     the center track). Pin both occupants to their real tracks. */
+  [class*="_frame"]:not([data-sidebar-collapsed]) > [class*="_centerCol"] {
+    grid-column: 2;
+  }
+
+  [class*="_frame"]:not([data-sidebar-collapsed]) > [class*="_rightbarCol"] {
+    grid-column: 3;
+  }
+
+  /* The sidebar root sets an inline width (264-420px) whenever it is not
+     collapsed; in drawer mode it must fill the drawer instead. The slot
+     wrapper in between is display:contents, so both levels are covered. */
+  [class*="_frame"]:not([data-sidebar-collapsed]) > [class*="_sidebarCol"] > *,
+  [class*="_frame"]:not([data-sidebar-collapsed]) > [class*="_sidebarCol"] [class*="_root"] {
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  /* No panel resizing on a phone. */
+  [class*="_handle"] {
+    display: none !important;
+  }
+
+  /* One panel at a time: the session drawer takes precedence over the right
+     info panel, which would otherwise float over the drawer at 45% width. */
+  [class*="_frame"]:not([data-sidebar-collapsed]) > [class*="_rightbarCol"] {
+    visibility: hidden;
+  }
+
+  /* --- 1b. Rail (collapsed) keeps its icons but gets phone-sized hit areas - */
+  [class*="_rail"] button,
+  [class*="_iconButton"],
+  [class*="_panelRow"] {
+    min-width: 40px;
+    min-height: 40px;
+  }
+
+  /* --- 1c. Composer sits above the gesture bar --------------------------- */
+  [class*="_composer"],
+  [class*="_root"] > [class*="_footer"] {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+@keyframes dshm-drawer-in {
+  from {
+    transform: translateX(-16px);
+    opacity: 0.4;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [class*="_frame"]:not([data-sidebar-collapsed]) > [class*="_sidebarCol"] {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 2. Modal panels (settings, plugin manager, …) go single-column
+ *    Upstream composes every settings-style surface as
+ *        overlay > panel > (nav column | content column)
+ *    which fits a desktop window but leaves ~170px for the content on a phone,
+ *    so labels wrap one glyph per line. `:has()` anchors on that structure
+ *    instead of on a hash, so newly added panels inherit the fix.
+ * ------------------------------------------------------------------------ */
+@media (max-width: 1023px) {
+  [class*="_overlay"]:has(> [class*="_panel"] > [class*="_nav"]) {
+    align-items: stretch;
+  }
+
+  [class*="_panel"]:has(> [class*="_nav"]) {
+    flex-direction: column !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: 100% !important;
+    max-height: none !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    /* The panel is the scroll boundary once it fills the viewport. */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-sizing: border-box;
+  }
+
+  /* The nav column becomes a horizontal, scrollable tab strip. The nav owns
+     navTitle + navList; both must go inline, and the cells must stop being
+     full-width rows. */
+  [class*="_panel"]:has(> [class*="_nav"]) > [class*="_nav"] {
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 10px;
+    flex: none !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 48px;
+    max-height: none !important;
+    padding: 6px 12px !important;
+    overflow: hidden;
+    border-right: 0 !important;
+    border-bottom: 0.5px solid var(--dsw-alias-border-l3);
+  }
+
+  [class*="_panel"]:has(> [class*="_nav"]) > [class*="_nav"] > [class*="_navTitle"] {
+    flex: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-weight: 600;
+  }
+
+  [class*="_navList"] {
+    flex-direction: row !important;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 auto !important;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  [class*="_navList"]::-webkit-scrollbar {
+    display: none;
+  }
+
+  [class*="_navList"] > * {
+    flex: none !important;
+    width: auto !important;
+    max-width: none !important;
+    white-space: nowrap;
+  }
+
+  /* The content column owns the remaining height and scrolls on its own. */
+  [class*="_panel"]:has(> [class*="_nav"]) > *:not([class*="_nav"]) {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100% !important;
+    overflow-y: auto;
+  }
+}
+
+/* --- 1d. Scrim behind the drawer (tap to close) -------------------------- */
+
+.dshm-scrim {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  html.dshm-drawer-open .dshm-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgb(0 0 0 / 32%);
+    animation: dshm-scrim-in 180ms ease-out;
+  }
+}
+
+@keyframes dshm-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

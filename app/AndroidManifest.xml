@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DSH for Android — DeepSeek Harness in a bundled PRoot/Ubuntu sandbox.
+
+  No title bar, no action bar: the activity is a bare WebView frame plus a
+  native control panel that the user summons; the dsh Web UI is the app.
+
+  targetSdk 28 is deliberate. Since Android 10 the SELinux domain an app lands
+  in depends on its targetSdkVersion, and only the legacy domains are allowed to
+  execve() binaries living in the app's private data dir. The whole payload
+  (Ubuntu rootfs + node + dsh) has to run from filesDir, so a modern targetSdk
+  would trade execution for nothing we need. minSdk 26 matches the payload's
+  assumptions (bionic, 64-bit arm).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="dev.dsh.android"
+    android:versionCode="1"
+    android:versionName="1.0"
+    android:installLocation="internalOnly">
+
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="28" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Shizuku: the privileged Android channel. Declaring the API permission
+         makes the app a Shizuku client, so the Web UI can offer (and the agent
+         can use) the same shell the adb/Shizuku server already runs with,
+         instead of asking the user to grant root. -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    <!-- Legacy storage: the guest gets a bind mount onto shared storage so the
+         agent can actually see the user's files. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+
+    <application
+        android:name="dev.dsh.android.App"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:requestLegacyExternalStorage="true"
+        android:extractNativeLibs="true"
+        android:usesCleartextTraffic="true"
+        android:hardwareAccelerated="true"
+        android:supportsRtl="false">
+
+        <activity
+            android:name="dev.dsh.android.MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode|density"
+            android:theme="@style/AppTheme"
+            android:windowSoftInputMode="adjustResize"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name="dev.dsh.android.DshService"
+            android:exported="false"
+            android:stopWithTask="false" />
+
+        <!-- Shizuku client plumbing (rikka.shizuku:provider). The manager
+             process delivers its binder through this provider; the client
+             library needs it declared with exactly this authority shape and
+             the V3_SUPPORT marker for the Shizuku API v13 protocol. -->
+        <meta-data
+            android:name="moe.shizuku.client.V3_SUPPORT"
+            android:value="true" />
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="dev.dsh.android.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+    </application>
+</manifest>

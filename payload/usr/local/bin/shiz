@@ -1,0 +1,103 @@
+#!/usr/bin/env node
+/**
+ * shiz — run a command on the phone's Android shell through Shizuku.
+ *
+ * The sandbox is a Linux guest: it can see /sdcard, but it cannot touch the
+ * Android system (package manager, settings, activity manager, input,
+ * screencap). The DSH Android app holds a Shizuku grant, and its control bridge
+ * exposes exactly that one capability. This is the guest-side half of it.
+ *
+ *   shiz pm list packages -3
+ *   shiz settings get global airplane_mode_on
+ *   shiz am start -n com.android.settings/.Settings
+ *   shiz --status            # is Shizuku reachable and granted?
+ *   shiz --help
+ *
+ * Exit codes: the command's own exit status; 2 for bridge/protocol trouble, 3
+ * when Shizuku is unavailable or not granted.
+ */
+import { existsSync, readFileSync } from "node:fs";
+
+const STATUS_EXIT = 3;
+const BRIDGE_EXIT = 2;
+
+function findBridge() {
+  const url = process.env.DSH_ANDROID_BRIDGE_URL;
+  const token = process.env.DSH_ANDROID_BRIDGE_TOKEN;
+  if (url && token) return { url, token };
+  // Fall back to the file the app writes before launching the guest, so the
+  // script also works from a shell started outside the harness process tree.
+  for (const path of ["/etc/dsh-android/bridge.env", "/root/.dsh-android-bridge.env"]) {
+    if (!existsSync(path)) continue;
+    const values = {};
+    for (const line of readFileSync(path, "utf8").split("\n")) {
+      const match = /^\s*([A-Z_]+)\s*=\s*(.*)\s*$/.exec(line);
+      if (match) values[match[1]] = match[2].replace(/^["']|["']$/g, "");
+    }
+    if (values.DSH_ANDROID_BRIDGE_URL && values.DSH_ANDROID_BRIDGE_TOKEN) {
+      return { url: values.DSH_ANDROID_BRIDGE_URL, token: values.DSH_ANDROID_BRIDGE_TOKEN };
+    }
+  }
+  return null;
+}
+
+async function call(bridge, path, body) {
+  const response = await fetch(bridge.url + path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: {
+      "X-Dsh-Token": bridge.token,
+      ...(body === undefined ? {} : { "Content-Type": "application/json" })
+    },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  const text = await response.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`bridge returned non-JSON (${response.status}): ${text.slice(0, 200)}`);
+  }
+}
+
+const argv = process.argv.slice(2);
+
+if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
+  console.log(`shiz — run a command as the Android shell user (via Shizuku)
+
+Usage:
+  shiz <command> [args...]     run a shell command on the phone
+  shiz --status                report whether Shizuku is reachable
+  shiz --raw <command string>  pass the command through sh -c verbatim
+
+The Android shell user can use pm, am, settings, input, screencap, cmd and the
+rest of the platform tooling. It is NOT the sandbox: files it writes land in
+Android's own paths.`);
+  process.exit(0);
+}
+
+const bridge = findBridge();
+if (bridge === null) {
+  console.error("shiz: no control bridge (this sandbox is not running under the DSH Android app)");
+  process.exit(BRIDGE_EXIT);
+}
+
+try {
+  if (argv[0] === "--status") {
+    const snapshot = await call(bridge, "/snapshot");
+    const shizuku = snapshot.shizuku ?? {};
+    console.log(`installed=${shizuku.installed === true} granted=${shizuku.granted === true} version=${shizuku.version ?? 0}`);
+    process.exit(shizuku.granted === true ? 0 : STATUS_EXIT);
+  }
+
+  const command = argv[0] === "--raw" ? argv.slice(1).join(" ") : argv.join(" ");
+  const result = await call(bridge, "/shizuku/exec", { command });
+  if (typeof result.stdout === "string" && result.stdout.length > 0) process.stdout.write(result.stdout);
+  if (typeof result.stderr === "string" && result.stderr.length > 0) process.stderr.write(result.stderr);
+  if (typeof result.error === "string" && result.error.length > 0) {
+    console.error("shiz: " + result.error);
+    process.exit(STATUS_EXIT);
+  }
+  process.exit(typeof result.exit === "number" ? result.exit : 0);
+} catch (error) {
+  console.error("shiz: " + (error?.message ?? error));
+  process.exit(BRIDGE_EXIT);
+}
