@@ -14,10 +14,11 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="dev.dsh.android"
-    android:versionCode="1"
-    android:versionName="1.0"
     android:installLocation="internalOnly">
 
+    <!-- Version is injected by scripts/build_apk.sh from the VERSION file: one
+         source of truth, and aapt2 only fills these in when the manifest is
+         silent about them. -->
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="28" />
 
     <uses-permission android:name="android.permission.INTERNET" />
