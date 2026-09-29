@@ -1,101 +1,97 @@
 # dsh-android
 
-基于 WebView 的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 安卓发行版。采用 Ubuntu Proot 以增加兼容性。
+把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 装进安卓手机。
 
-把 `dsh web` 这套东西连同它需要的整套运行时（Ubuntu rootfs + Node + 依赖）打进一个 APK，
-在手机本地用 PRoot 跑起来，用 WebView 当界面。**不需要 Termux、不需要 root、不依赖任何第三方 App。**
+**一个 APK 搞定：不需要 Termux、不需要 root、不依赖任何其他应用。** 应用自带一套 Ubuntu 运行时，
+在手机本地把 harness 跑起来，界面就是 harness 自己的 Web UI。
 
-```
-┌─────────────── APK (dev.dsh.android) ───────────────┐
-│  MainActivity ── WebView ──► http://127.0.0.1:3080  │
-│      │                                      ▲       │
-│      │ 控制桥 (127.0.0.1:8399, 每启动一个 token)     │
-│      ▼                                      │       │
-│  libproot.so ──► Ubuntu 24.04 rootfs (filesDir)     │
-│                     ├── node (官方构建) + dsh web ──┘
-│                     └── pty-server.mjs ──► 终端面板
-└─────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/images/main.jpg" width="30%" alt="主界面" />
+  <img src="docs/images/terminal.jpg" width="30%" alt="沙箱终端" />
+  <img src="docs/images/settings.jpg" width="30%" alt="沙箱设置" />
+</p>
 
-## 现在能干什么
+## 这是什么
 
-- **完整的 Harness**：会话、工具、子代理、Agent Teams、workflow、计划模式、技能 —— 和桌面端同一套代码，只是跑在手机里。
-- **终端**：左侧栏 `>_` 图标，沙箱内的真 PTY（`/dev/pts/N`），带命令输入栏（中文输入法在 xterm 里会乱灌候选，所以输入走独立输入框）。
-- **挂载**：把手机上的任意文件夹挂进沙箱（SAF 选目录，解析成真实路径），agent 和终端直接读写。
-- **导出**：沙箱里的文件一键复制到手机 Download；文件预览工具栏和设置页都有入口。
-- **Android 特权通道**：`shiz` CLI 通过 Shizuku 以 shell 身份执行 `pm` / `am` / `settings` / `input` / `screencap` / `cmd app_function`。
-- **热更新包**：22 KB 的 `dsh-hot.zip` 放进 Download 目录、重开应用即可更新插件/技能/脚本，不必重装 APK。
-- **跟随系统主题**：浅色/深色自适应，连图标都会反色（浅色=白底黑鲸，深色=黑底白鲸）。
+DeepSeek Harness 官方以 `npx @deepseek-ai/dsh web` 的形式在电脑上跑。这个项目的做法是：
+把整套运行时（Ubuntu rootfs + Node + harness 及其依赖）打进一个 APK，用 PRoot 在手机里启动它，
+再用 WebView 打开它的界面 —— 于是**手机上得到的就是原样的 harness**，不是重做的客户端。
 
-## 构建
+## 能干什么
 
-不需要 Android Studio、不需要 Gradle。整套流水线是 aapt2 + d8 + 手写 zip 打包 + apksig v2/v3 签名：
+- **完整的 Harness**：会话、工具调用、子代理、Agent Teams、workflow、计划模式、技能，和桌面端同一套代码。
+- **沙箱终端**：左侧栏 `>_` 图标，沙箱里的真 PTY。带命令输入栏（中文输入法在终端里会乱灌候选，所以输入走独立输入框）、历史命令、粘贴。
+- **挂载手机文件夹**：把任意目录挂进沙箱，agent 和终端直接读写。选目录时用系统文件夹选择器。
+- **导出文件到手机**：沙箱里的文件一键复制到手机 Download，文件预览页和设置页都有入口。
+- **操作手机本身**（可选，需要 [Shizuku](https://shizuku.rikka.app/)）：内置 `shiz` 命令，以 Android shell 身份执行 ——
+  打开应用、看屏幕截图、调亮度、开关勿扰、读通知、装 APK……随附的 `phone-control` 技能会教 agent 怎么用。
+- **跟随系统主题**：浅色/深色、连图标都会反色；Android 13+ 还支持主题化图标。
 
-```sh
-# 1. 准备 Ubuntu 载荷（一次性，约 10 分钟）
-sh scripts/prepare_rootfs.sh          # 下载 ubuntu-base + 官方 node，装依赖
-# 2. 装配载荷（打补丁 + 裁剪 + 覆盖 guest 文件）
-sh scripts/assemble_payload.sh
-python3 scripts/make_payload_zip.py build/rootfs-ubuntu build/payload-assets/payload.zip
-# 3. 出包
-sh scripts/build_apk.sh               # → out/dsh-android.apk
-```
+## 安装
 
-依赖：`aapt2`（x86_64 glibc，经 qemu 跑）、`d8`、JDK 11、`rsvg-convert`（生成图标）。
-细节见 [docs/BUILD.md](docs/BUILD.md)。
+**要求**：Android 8.0 以上、**arm64** 手机（绝大多数现代手机）。
 
-## 开发流程
+1. 下载 `dsh-android.apk`（见 [Releases](../../releases)；如果还没有发布包，可以按 [构建文档](docs/BUILD.md) 自己打一个），拷到手机。
+2. 在文件管理器里点它安装，按提示允许「未知来源」。
+3. 打开应用。**首次启动需要解包约 400 MB 的运行时，大约 2 分钟**（只有这一次）；
+   屏幕上会显示进度，之后每次冷启动约 5 秒。
 
-```sh
-# 改完源码后：同步到 git 检出、提交、推送（自动处理本沙箱的 PRoot 怪癖）
-sh scripts/sync_repo.sh "这次改了什么"
-```
+## 第一次用
 
-构建产物、图标、载荷都不会进仓库；重新克隆后 `build_apk.sh` 会先生成它们。
+1. **配置模型**：设置 → 模型 → 填 DeepSeek API Key（也可以用其他 OpenAI 兼容的端点）。
+   想省事的话，在 设置 → 安卓沙箱 → API Key 里填也行，它会作为环境变量注入沙箱。
+2. **选工作区**：点「选择工作区」，选一个目录，然后就能开始对话了。
+3. **（可选）授权 Shizuku**：设置 → 安卓沙箱 → Shizuku → 请求授权。
+   授权后 agent 才能操作手机本身（截图、开关应用、改设置……）。
+4. **（可选）挂载文件夹 / 共享手机存储**：设置 → 安卓沙箱 → 挂载。
+   首次会申请存储权限，授权后沙箱里的 `/sdcard` 就是你手机上的共享存储。
 
-## 目录
+## 更新
 
-| 路径 | 内容 |
-|---|---|
-| `app/` | Android 侧：Activity、控制台、控制桥、PRoot 调用、载荷安装 |
-| `payload/` | guest 侧：`start-dsh.sh`、`pty-server.mjs`、`shiz` CLI、改过的发行版文件 |
-| `plugin/dsh-plugin-android/` | dsh 插件：系统提示词 + 设置页 + 终端面板 |
-| `profile/` | 预置的 dsh profile（插件已装好） |
-| `patches/` | 对上游源码的补丁（原子写硬链接回退、手机端布局、musl 桩） |
-| `scripts/` | 全部构建流水线（含图标生成、载荷打包、本地分发服务器、仓库同步） |
-| `docs/` | 架构、构建、[踩坑记录](docs/FINDINGS.md) |
-| `assets/` | 品牌标识源文件（图标由它生成） |
+应用支持**热更新包**：插件、技能、系统提示词、沙箱脚本的改动打在一个几十 KB 的 `dsh-hot.zip` 里，
+放进手机的 `Download` 目录、重新打开应用即可生效 —— **不用重装 APK**。
 
-## 设计要点
+外壳本身（界面、图标、新功能）的更新需要装新的 APK，直接覆盖安装即可，
+你的会话、API Key 和设置都会保留。
 
-- **为什么是 Ubuntu 而不是 Alpine**：上游发布预编译二进制时默认目标是 glibc。Alpine/musl 上
-  `node-pty` 没有预编译、`node-addon-require-builtin` 干脆没发 musl 包、Alpine 的 node 构建没有
-  TypeScript 支持（`workflow` 直接不可用）。换成 glibc 后这三处全部归零，代价是 APK 从 73 MB 涨到 143 MB。
-- **为什么 rootfs 用 zip 而不是 tar.gz**：Android 的 `java.util.zip.ZipEntry` 没有
-  `getExternalAttributes()`，unix 权限和符号链接另存一份 `payload.manifest`。自己手写 tar 解析器
-  在 pax global 头和填充字节上翻过车（静默吞文件），不再冒这个险。
-- **为什么给 dsh 打补丁**：Android 的 SELinux 禁止 `link()`（连 shell 都不行），而 harness 的原子写
-  在"新建文件"这条路径上用 `link()` 发布 —— 于是新建文件全挂。补丁让它在文件系统不支持硬链接时
-  回退到 `copyFile(..., COPYFILE_EXCL)`，覆盖语义完全不变。
-- **为什么有热更新包**：载荷按**内容哈希**版本化，任何改动都会触发 400 MB 重新解包。插件/技能/脚本
-  这些高频改动的小文件走独立的 22 KB 覆盖包，每次启动重放。
+## 常见问题
 
-更多细节：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)、[docs/FINDINGS.md](docs/FINDINGS.md)（踩过的坑）。
+**首次启动卡在「正在安装内置沙箱」很久？**
+正常，它在解包约 400 MB 的运行时。2 分钟左右，只做一次。请确保手机有足够空间（约 1 GB 余量）。
+
+**为什么抓网页失败，报 `WEB_BLOCKED_URL` / non-public IP？**
+手机开了 fake-IP 模式的代理（Clash 之类）时，所有域名都解析到 `198.18.0.0/15`，harness 的 SSRF 防护
+会按设计拒绝。让 agent 用 `bash` + `node fetch` 绕过即可 —— 附带的技能里已经写明。
+
+**沙箱里看不到我的文件？**
+去 设置 → 安卓沙箱 → 挂载，把要用的目录加进来；或者在系统设置里授予存储权限后用 `/sdcard`。
+注意：guest 里是 Linux 路径，手机上的 `Download` 在沙箱里是 `/sdcard/Download`。
+
+**服务起不来 / 白屏怎么办？**
+右上角会出现 `≡` 按钮（服务没起来时它才出现），点开是控制台：能看日志、启停服务、导入 rootfs。
+
+**耗电吗？**
+服务在前台服务里跑，带一个 CPU 保持唤醒的锁，好让长时间任务不被系统冻结。
+不想要的话，设置 → 安卓沙箱 → 关掉「后台保活」。不用的时候点「停止」即可。
+
+**支持哪些设备？**
+arm64（arm64-v8a）的 Android 8.0+ 设备。x86 设备、32 位设备不支持。
 
 ## 已知限制
 
-- 只支持 **arm64**，minSdk 26，targetSdk 28（低 targetSdk 是为了能 exec 应用私有目录里的二进制）。
-- APK 143 MB，首次启动要解包约 400 MB（约 2 分钟），之后冷启动约 5 秒。
-- 网络相关：手机开着 fake-IP 模式的代理时，`web_fetch` 的 SSRF 防护会拒绝所有公网域名
-  （按设计如此），得用 `bash` + `node fetch` 绕过。
-- Shizuku 需要用户手动授权；没授权时 `shiz` 会明确报错，不会静默失败。
+- APK 有 143 MB —— 因为它自带一整套 Linux 运行时，这是刻意的取舍（见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)）。
+- 没有 root。需要 root 的操作做不到。
+- 非官方项目，与 DeepSeek 没有隶属关系。
 
-## 版权
+## 反馈
 
-本项目是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（MIT）的非官方安卓移植，
-与 DeepSeek 无关联。其中的鲸鱼标识、Ubuntu rootfs、Node 以及各 npm 依赖的版权归各自所有，
-详见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+有问题或建议请开 [Issue](../../issues)。附上 设置 → 安卓沙箱 → 日志 里的内容会很有帮助。
 
-## 许可
+## 许可与致谢
 
-[MIT](LICENSE)
+[MIT](LICENSE)。这是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（MIT）的非官方安卓移植，
+其中的品牌标识、Ubuntu、Node 及各 npm 依赖的版权归各自所有者，详见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+
+---
+
+<sub>想自己构建、看架构设计或踩坑记录？[docs/BUILD.md](docs/BUILD.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/FINDINGS.md](docs/FINDINGS.md)</sub>

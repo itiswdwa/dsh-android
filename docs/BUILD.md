@@ -57,6 +57,23 @@ sh scripts/build_apk.sh            # → out/dsh-android.apk
 
 > 对齐断言要检查**数据偏移**，不是 local header 偏移 —— 这里错过一次，打包器自己会打脸。
 
+## 提交改动
+
+源码在 `/var/minis/workspace/dsh-android/` 构建，git 检出在 `/var/minis/workspace/dsh-android-repo/`。
+一条命令同步 + 提交 + 推送：
+
+```sh
+sh scripts/sync_repo.sh "这次改了什么"
+```
+
+它顺手处理的三个本沙箱特有的坑（原因见 [FINDINGS.md](FINDINGS.md#10-proroot-的-link2symlink-还会打中-git和-rm)）：
+
+- `git config core.createObject rename` —— 否则 PRoot 的 link2symlink 会让 loose object 悬空；
+- 用 `git clean -Xfd`（大写）只清生成物，别把还没 add 的新源码删掉；
+- remote 固定用 SSH（沙箱里的是部署密钥，HTTPS 会要一个读不到的用户名）。
+
+构建产物、图标、载荷、签名密钥都不进仓库。
+
 ## 签名
 
 `keystore/dsh.p12` 由 `build_apk.sh` 首次运行时生成（口令写在脚本里的 `KS_PASS`）。
