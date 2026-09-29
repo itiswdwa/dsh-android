@@ -53,7 +53,9 @@ sh scripts/build_apk.sh               # → out/dsh-android.apk
 | `plugin/dsh-plugin-android/` | dsh 插件：系统提示词 + 设置页 + 终端面板 |
 | `profile/` | 预置的 dsh profile（插件已装好） |
 | `patches/` | 对上游源码的补丁（原子写硬链接回退、手机端布局、musl 桩） |
-| `scripts/` | 全部构建流水线 |
+| `scripts/` | 全部构建流水线（含图标生成、载荷打包、本地分发服务器、仓库同步） |
+| `docs/` | 架构、构建、[踩坑记录](docs/FINDINGS.md) |
+| `assets/` | 品牌标识源文件（图标由它生成） |
 
 ## 设计要点
 
