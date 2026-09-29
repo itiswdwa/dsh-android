@@ -97,6 +97,17 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
             }
 
             @Override
+            public void onOpenUrlRequested(String url) {
+                handler.post(() -> {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                    } catch (ActivityNotFoundException error) {
+                        Toast.makeText(MainActivity.this, "没有可用的浏览器", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+
+            @Override
             public void onShizukuPermissionRequested() {
                 handler.post(() -> {
                     if (ShizukuBridge.available()) {

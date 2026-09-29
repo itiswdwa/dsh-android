@@ -46,6 +46,8 @@ public final class BridgeServer {
 
         void onPickMountFolderRequested();
 
+        void onOpenUrlRequested(String url);
+
         void onOpenInBrowser();
 
         void onShizukuPermissionRequested();
@@ -198,6 +200,19 @@ public final class BridgeServer {
                 if (host != null) host.onImportRequested();
                 respondJson(out, 200, ok("请在手机上选择 rootfs 归档"));
                 return;
+            case "/update/check": {
+                respondJson(out, 200, Updates.check(request.optString("url", Updates.MANIFEST)));
+                return;
+            }
+            case "/hot/fetch": {
+                respondJson(out, 200, Payload.fetchAndApply(App.i(), request.optString("url", "")));
+                return;
+            }
+            case "/open-url": {
+                if (host != null) host.onOpenUrlRequested(request.optString("url", ""));
+                respondJson(out, 200, ok("已在浏览器打开"));
+                return;
+            }
             case "/export": {
                 respondJson(out, 200, Exports.run(request.optString("path", "")));
                 return;
@@ -352,6 +367,8 @@ public final class BridgeServer {
             root.put("sharedStorage", app.sharedStorage() == null ? ""
                     : app.sharedStorage().getAbsolutePath());
 
+            root.put("appVersion", App.appVersion());
+            root.put("appVersionCode", App.appVersionCode());
             root.put("hotVersion", Payload.hotVersion());
             root.put("packagedHotVersion", Payload.packagedHotVersion());
 

@@ -47,6 +47,10 @@ STATE = {
         "11:02:15  dsh web: http://127.0.0.1:3080/?token=stub",
     ],
     "import": {"active": False, "message": ""},
+    "appVersion": "1.1.0",
+    "appVersionCode": 10100,
+    "hotVersion": "",
+    "packagedHotVersion": "48e41846732ebde5",
 }
 
 

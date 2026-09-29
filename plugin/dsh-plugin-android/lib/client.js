@@ -47,6 +47,18 @@ window.__ModuleLoader__.load({
 			hotCurrent: "当前：内置 %s",
 			hotApplied: "已导入外部包 %s",
 			hotHint: "收到 dsh-hot.zip 后放进手机的 Download 目录，重新打开应用即可导入（插件、技能、沙箱脚本都能这样更新，不必重装 APK）。",
+			updCheck: "检查更新",
+			updChecking: "检查中…",
+			updLatest: "已是最新（%s）",
+			updFailed: "检查失败：%s（也可以手动把 dsh-hot.zip 放进 Download 导入）",
+			updHotTitle: "热更新可用 · %s",
+			updHotHint: "插件、技能、提示词、沙箱脚本，约 %s KB，一键应用",
+			updHotApply: "应用热更新",
+			updHotApplied: "已应用，重开应用生效",
+			updAppTitle: "重要更新可用 · v%s",
+			updAppHint: "外壳（界面、图标、新接口），%s MB，需要安装新 APK；会话、密钥、设置都会保留",
+			updAppDownload: "前往下载",
+			updChannels: "当前：应用 %s · 热包 %s",
 			exportTitle: "导出到手机",
 			exportPath: "沙箱内路径",
 			exportRecent: "最近的文件",
@@ -114,6 +126,18 @@ window.__ModuleLoader__.load({
 			hotCurrent: "packaged %s",
 			hotApplied: "imported %s",
 			hotHint: "Drop a received dsh-hot.zip into the phone's Download folder and reopen the app to apply it. Plugins, skills and sandbox scripts update this way — no APK reinstall.",
+			updCheck: "Check for updates",
+			updChecking: "Checking…",
+			updLatest: "Up to date (%s)",
+			updFailed: "Check failed: %s (you can also drop dsh-hot.zip into Download)",
+			updHotTitle: "Hot update available · %s",
+			updHotHint: "Plugins, skills, prompt and sandbox scripts — about %s KB, one tap",
+			updHotApply: "Apply hot update",
+			updHotApplied: "Applied; reopen the app to load it",
+			updAppTitle: "App update available · v%s",
+			updAppHint: "The shell (UI, icon, new endpoints), %s MB, needs a new APK install; sessions, keys and settings are kept",
+			updAppDownload: "Open download page",
+			updChannels: "Installed: app %s · hot %s",
 			exportTitle: "Export to phone",
 			exportPath: "Sandbox path",
 			exportRecent: "Recent files",
@@ -483,6 +507,91 @@ window.__ModuleLoader__.load({
 			);
 		}
 
+
+		function UpdateCard(props) {
+			const t = props.t;
+			const app = props.app ?? "";
+			const applied = props.applied ?? "";
+			const packaged = props.packaged ?? "";
+			const versionCode = props.versionCode ?? 0;
+			const [state, setState] = react.useState("idle");
+			const [info, setInfo] = react.useState(null);
+			const [message, setMessage] = react.useState("");
+			const current = applied === "" ? packaged : applied;
+
+			// Through the bridge: the app fetches the manifest server-side, so
+			// there is no cross-origin request and a failure comes back readable.
+			const check = async () => {
+				setState("checking");
+				setMessage("");
+				try {
+					const data = await call("/update/check", {});
+					if (data.ok !== true) throw new Error(data.error ?? "未知错误");
+					setInfo(data);
+					setState("done");
+				} catch (error) {
+					setState("failed");
+					setMessage(String(error.message ?? error));
+				}
+			};
+			react.useEffect(() => { check(); }, []);
+
+			const hotNew = info !== null && info.hot !== undefined && info.hot.version !== ""
+				&& info.hot.version !== current && info.hot.version !== packaged;
+			const appNew = info !== null && info.app !== undefined
+				&& (info.app.versionCode ?? 0) > versionCode;
+
+			return h("div", { style: S.card },
+				h("div", { style: S.row },
+					h("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary, #666)" } },
+						t("updChannels").replace("%s", app).replace("%s", current || "-")),
+					h("span", { style: { flex: 1 } }),
+					h(Button, { onClick: check, disabled: state === "checking" },
+						state === "checking" ? t("updChecking") : t("updCheck"))
+				),
+				state === "done" && !hotNew && !appNew
+					? h("div", { style: { fontSize: 12, marginTop: 8, color: "var(--dsw-alias-label-secondary, #666)" } },
+						t("updLatest").replace("%s", app))
+					: null,
+				state === "failed"
+					? h("div", { style: { fontSize: 12, marginTop: 8, color: "var(--dsw-alias-label-secondary, #666)" } },
+						t("updFailed").replace("%s", message))
+					: null,
+				hotNew
+					? h("div", { style: { marginTop: 10, paddingTop: 10, borderTop: "0.5px solid var(--dsw-alias-border-l3, rgba(0,0,0,0.08))" } },
+						h("div", { style: { fontSize: 13, fontWeight: 600 } },
+							t("updHotTitle").replace("%s", String(info.hot.version).slice(0, 8))),
+						h("div", { style: { fontSize: 11, margin: "4px 0 8px", color: "var(--dsw-alias-label-secondary, #666)" } },
+							t("updHotHint").replace("%s", String(Math.round((info.hot.bytes ?? 54000) / 1024)))),
+						h(Button, {
+							kind: "primary",
+							onClick: async () => {
+								setMessage(t("busy"));
+								try {
+									const result = await call("/hot/fetch", { url: info.hot.url });
+									setMessage(result.message ?? result.error ?? "");
+								} catch (error) {
+									setMessage(String(error.message ?? error));
+								}
+							}
+						}, t("updHotApply"))
+					)
+					: null,
+				appNew
+					? h("div", { style: { marginTop: 10, paddingTop: 10, borderTop: "0.5px solid var(--dsw-alias-border-l3, rgba(0,0,0,0.08))" } },
+						h("div", { style: { fontSize: 13, fontWeight: 600 } },
+							t("updAppTitle").replace("%s", info.app.version)),
+						h("div", { style: { fontSize: 11, margin: "4px 0 8px", color: "var(--dsw-alias-label-secondary, #666)" } },
+							t("updAppHint").replace("%s", "143")),
+						h(Button, {
+							onClick: () => call("/open-url", { url: info.app.page ?? info.app.url })
+						}, t("updAppDownload"))
+					)
+					: null,
+				message !== "" ? h("div", { style: { fontSize: 12, marginTop: 8, color: "var(--dsw-alias-label-secondary, #666)" } }, message) : null
+			);
+		}
+
 		function ShizukuCard(props) {
 			const [output, setOutput] = react.useState("");
 			const [command, setCommand] = react.useState("id");
@@ -605,6 +714,13 @@ window.__ModuleLoader__.load({
 				})),
 
 				h("div", { style: S.h }, t("hotTitle")),
+			h(UpdateCard, {
+				t,
+				app: snapshot.appVersion,
+				versionCode: snapshot.appVersionCode,
+				packaged: snapshot.packagedHotVersion,
+				applied: snapshot.hotVersion
+			}),
 			h(HotCard, { t, packaged: snapshot.packagedHotVersion, applied: snapshot.hotVersion }),
 
 			h("div", { style: S.h }, t("exportTitle")),

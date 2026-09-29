@@ -96,6 +96,15 @@ public final class App extends Application {
         android.util.Log.i("dsh", "removed legacy alpine distro");
     }
 
+    /** Shell version (the APK), for the update card and the bridge snapshot. */
+    public static String appVersion() {
+        return BuildInfo.APP_VERSION;
+    }
+
+    public static int appVersionCode() {
+        return BuildInfo.APP_VERSION_CODE;
+    }
+
     /** Distro the app boots; the bundled Ubuntu unless the user picked another. */
     public String activeDistroId() {
         return prefs.getString("distro", BUNDLED_ID);

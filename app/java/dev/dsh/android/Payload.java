@@ -134,6 +134,78 @@ public final class Payload {
         }
     }
 
+    /**
+     * Download a hot package and apply it — the one-tap path.
+     *
+     * Only ever called from a bridge worker thread, and only for the ~50 KB hot
+     * archive: the APK itself is never downloaded in-process, because a 143 MB
+     * transfer belongs to the browser and the system installer.
+     */
+    public static org.json.JSONObject fetchAndApply(Context ctx, String url) {
+        org.json.JSONObject answer = new org.json.JSONObject();
+        try {
+            if (url == null || !url.startsWith("https://")) {
+                answer.put("ok", false);
+                answer.put("error", "只接受 https 地址");
+                return answer;
+            }
+            File staged = new File(App.i().tmpDir, "hot-download.zip");
+            java.net.HttpURLConnection connection =
+                    (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(60000);
+            connection.setInstanceFollowRedirects(true);
+            connection.setRequestProperty("User-Agent", "dsh-android/" + BuildInfo.APP_VERSION);
+            long total = 0;
+            try (InputStream in = connection.getInputStream();
+                 OutputStream out = new FileOutputStream(staged)) {
+                total = copy(in, out, null);
+            }
+            if (connection.getResponseCode() != 200 || total < 1024) {
+                answer.put("ok", false);
+                answer.put("error", "下载失败 (HTTP " + connection.getResponseCode() + ", " + total + " 字节)");
+                return answer;
+            }
+            try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(staged)) {
+                String version = hotVersionOf(zip);
+                if (version == null) {
+                    answer.put("ok", false);
+                    answer.put("error", "不是有效的热更新包（缺 hot.json）");
+                    return answer;
+                }
+                if (version.equals(App.i().prefs.getString(HOT_VERSION_KEY, ""))) {
+                    answer.put("ok", true);
+                    answer.put("version", version);
+                    answer.put("message", "已经是最新（" + version + "）");
+                    return answer;
+                }
+                int written = unpackHot(ctx, zip, version);
+                if (written < 0) {
+                    answer.put("ok", false);
+                    answer.put("error", "解包失败");
+                    return answer;
+                }
+                App.i().prefs.edit().putString(HOT_VERSION_KEY, version).apply();
+                answer.put("ok", true);
+                answer.put("version", version);
+                answer.put("files", written);
+                answer.put("bytes", total);
+                answer.put("message", "热更新已应用（" + version + "，" + written + " 个文件），下次打开生效");
+                App.log("hot update applied from " + url + ": " + version + " (" + written + " files)");
+            }
+            //noinspection ResultOfMethodCallIgnored
+            staged.delete();
+        } catch (Throwable error) {
+            App.log("hot fetch failed: " + error);
+            try {
+                answer.put("ok", false);
+                answer.put("error", String.valueOf(error.getMessage()));
+            } catch (Throwable ignored) {
+            }
+        }
+        return answer;
+    }
+
     /** Version of the hot package received out of band, empty when none was applied. */
     public static String hotVersion() {
         return App.i().prefs.getString(HOT_VERSION_KEY, "");
