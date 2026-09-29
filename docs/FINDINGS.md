@@ -96,7 +96,29 @@ xterm 再把 composition 内容当输入回放 —— 结果是一屏推荐词�
 后来任何载荷改动都会自动触发重新解包，同时高频改动的小文件走独立的 22 KB 热包，
 避免每次都付 400 MB 的代价。
 
-## 10. 技能目录为空的两个原因
+## 10. PRoot 的 link2symlink 还会打中 git（和 rm）
+
+同一个根因，换了个受害者：**在这个沙箱里跑 git，提交会"成功"但对象是坏的**。
+
+git 写 loose object 时用 `link()` 保证"不覆盖已存在的对象"，于是被 PRoot 换成指向
+`.l2s.tmp_obj_*` 的软链；git 随即删掉临时文件，对象就悬空了 —— 下一次操作报
+`fatal: bad object HEAD`。仓库能克隆、能提交、甚至能推送（推的时候目标还在），坏的是之后。
+
+修法是让 git 不走 link 路径：
+
+```sh
+git config core.createObject rename
+```
+
+验证方式是构建后 `git fsck`（干净才算过），`scripts/sync_repo.sh` 里已经固化。
+
+顺带一个连带损失：**`rm -rf` 删不掉这些悬空软链**（`rm` 先 `stat`，而 `stat` 就 EPERM），
+目录因此清理不掉、也替换不掉。`scripts/force_rmtree.py` 用 `os.unlink()` 绕过（它不先 stat）。
+
+另外，`git clean -xfd` 和 `git clean -Xfd` 差一个大小写，前者会把**还没 add 的新文件**一起删掉 ——
+同步脚本里踩过，注释也写在那儿了。
+
+## 11. 技能目录为空的两个原因
 
 一是 profile 里的 `customSkillDirs` 用相对 profile 目录的 `require.resolve()` 指向上游预设包，
 而 profile 的 `node_modules` 里只有自己的插件 → 解析失败；二是裁剪脚本把 `*.md` 全删了，

@@ -44,6 +44,15 @@ sh scripts/build_apk.sh               # → out/dsh-android.apk
 依赖：`aapt2`（x86_64 glibc，经 qemu 跑）、`d8`、JDK 11、`rsvg-convert`（生成图标）。
 细节见 [docs/BUILD.md](docs/BUILD.md)。
 
+## 开发流程
+
+```sh
+# 改完源码后：同步到 git 检出、提交、推送（自动处理本沙箱的 PRoot 怪癖）
+sh scripts/sync_repo.sh "这次改了什么"
+```
+
+构建产物、图标、载荷都不会进仓库；重新克隆后 `build_apk.sh` 会先生成它们。
+
 ## 目录
 
 | 路径 | 内容 |
