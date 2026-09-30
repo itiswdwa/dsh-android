@@ -34,11 +34,19 @@ HOT_FOOTER = """**应用**：设置 → 安卓沙箱 → 检查更新 → 应用
 """
 
 HEADING = re.compile(r"^##\s+\[?([^\]]+?)\]?(?:\s+-\s+(.*))?$")
+DEFINITION = re.compile(r"^\[([^\]]+)\]:\s*(\S+)\s*$")
+REFERENCE = re.compile(r"\[([^\]]+)\]")
 
 
 def read_entry(changelog: Path, version: str) -> tuple[str, str]:
-    """The notice/groups body of one version, and the date from its heading."""
+    """The notice/groups body of one version, and the date from its heading.
+
+    Reference definitions live once at the bottom of the file, but a link only
+    resolves inside the document that carries its definition — so the ones the
+    entry actually uses are appended to the rendered body.
+    """
     lines = changelog.read_text(encoding="utf-8").splitlines()
+    definitions = {m.group(1): m.group(2) for m in (DEFINITION.match(line) for line in lines) if m}
     body: list[str] = []
     date = ""
     inside = False
@@ -51,7 +59,7 @@ def read_entry(changelog: Path, version: str) -> tuple[str, str]:
                 inside = True
                 date = (heading.group(2) or "").strip()
             continue
-        if inside:
+        if inside and DEFINITION.match(line) is None:
             body.append(line)
     if not inside:
         available = "、".join(
@@ -59,7 +67,11 @@ def read_entry(changelog: Path, version: str) -> tuple[str, str]:
         )
         sys.exit(f"CHANGELOG.md 里没有 {version} 的条目（现有：{available}）\n"
                  f"先写条目再发版 —— 更新日志是唯一的事实来源。")
-    return "\n".join(body).strip(), date
+    text = "\n".join(body).strip()
+    used = [name for name in dict.fromkeys(REFERENCE.findall(text)) if name in definitions]
+    if used:
+        text += "\n\n" + "\n".join(f"[{name}]: {definitions[name]}" for name in used)
+    return text, date
 
 
 def main() -> None:
