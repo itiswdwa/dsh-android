@@ -25,7 +25,6 @@ if [ "${1:-}" != "" ]; then
   echo "$VERSION" > "$ROOT/VERSION"
 fi
 TAG="v$VERSION"
-NOTES="$ROOT/docs/releases/$TAG.md"
 APK="$ROOT/out/dsh-android.apk"
 HOT="$ROOT/out/dsh-hot.zip"
 SUMS="$ROOT/out/SHA256SUMS"
@@ -39,7 +38,8 @@ if [ -z "${GITHUB_TOKEN:-}" ]; then
 没有 GITHUB_TOKEN，改用手动发布（大约三次点击）：
 
   1. 打开 https://github.com/$REPO/releases/new?tag=$TAG
-  2. 标题填 dsh-android $VERSION，正文从 $NOTES 复制
+  2. 标题填 dsh-android $VERSION，正文用
+     python3 scripts/release_notes.py $VERSION 生成（内容取自 CHANGELOG.md）
   3. 把这两个文件拖进去，然后 Publish：
        $APK   (137 MB)
        $HOT   (几十 KB)
@@ -63,13 +63,16 @@ for asset in json.load(sys.stdin):
 }
 
 body_json() {
-  python3 - "$NOTES" "$TAG" <<'PY'
-import json, pathlib, sys
-notes, tag = pathlib.Path(sys.argv[1]), sys.argv[2]
-text = notes.read_text(encoding="utf-8") if notes.is_file() else "见 README 的更新说明。"
-print(json.dumps({"tag_name": tag, "name": tag, "body": text,
+  # The body is the changelog entry, rendered — there is no second copy of the
+  # release description anywhere. No entry, no release: release_notes.py exits
+  # non-zero rather than publishing a release described only by its commits.
+  python3 "$ROOT/scripts/release_notes.py" "$VERSION" --channel app \
+    | python3 -c '
+import json, sys
+tag = sys.argv[1]
+print(json.dumps({"tag_name": tag, "name": tag, "body": sys.stdin.read(),
                   "draft": False, "prerelease": False}, ensure_ascii=False))
-PY
+' "$TAG"
 }
 
 BODY=$(body_json)

@@ -103,4 +103,5 @@ arm64（arm64-v8a）的 Android 8.0+ 设备。x86 设备、32 位设备不支持
 
 ---
 
-<sub>想自己构建、看架构设计或踩坑记录？[docs/BUILD.md](docs/BUILD.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/FINDINGS.md](docs/FINDINGS.md)</sub>
+<sub>想自己构建、看架构设计或踩坑记录？[docs/BUILD.md](docs/BUILD.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/FINDINGS.md](docs/FINDINGS.md)
+· 每个版本改了什么见 [CHANGELOG.md](CHANGELOG.md)</sub>

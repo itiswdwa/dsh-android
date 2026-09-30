@@ -87,12 +87,31 @@ sh scripts/sync_repo.sh "这次改了什么"
 
 也就是说：**只改 `plugin/` 或 `payload/` 时不要碰 `VERSION`，也不要重新出 APK**。
 `release_hot.sh` 会把新热包挂到*当前*那版 release 上（APK 资产原地不动），重新生成
-`update.json` 的 `hot` 段，把说明写进 `docs/releases/hot-<短哈希>.md` 并附到 release 正文的
-`<!-- hot-notes -->` 之后，最后推送清单 —— 顺序是先上资产再推清单，所以应用永远不会读到
-一个指向不存在文件的清单。
+`update.json` 的 `hot` 段，把正文段落附到 release 的 `<!-- hot-notes -->` 之后，最后推送清单
+—— 顺序是先上资产再推清单，所以应用永远不会读到一个指向不存在文件的清单。
 
 应用更新才需要抬 `VERSION`；`release.sh` 可重入，中途断掉再跑一次即可补齐资产。
 出包的完整步骤见上面的[三步](#三步)。
+
+### 发布说明写在 CHANGELOG.md，别处不写第二份
+
+release 正文由根目录 [CHANGELOG.md](../CHANGELOG.md) 渲染而来（`scripts/release_notes.py`），
+**版本在 CHANGELOG.md 里没有条目就发不出去** —— 这是有意的：只要允许"发布时再写一份"，
+就一定会出现正文讲一遍、变更日志讲另一遍、两边都跟代码对不上的局面。
+
+写条目时遵守两条外部规范：[Keep a Changelog](https://keepachangelog.com/1.1.0/) 管格式
+（`## [版本] - YYYY-MM-DD`、`Added / Changed / Fixed / Removed / Security`、版本倒序），
+[Common Changelog](https://common-changelog.org/) 管内容：
+
+- **一条一行**，写"对用户意味着什么"，不是"源码里改了哪一步"；
+- 分组归类；相关改动合并成一条，互相抵消的改动直接不写；
+- **不写噪音**：构建脚本、重构、dotfile、文档格式这类与使用者无关的改动不进发布说明
+  （它们属于 commit，不属于 release note）；
+- 破坏性改动以 `**Breaking:**` 开头并排在各组最前；
+- 面向使用者措辞 —— 判断标准是"拿到新版本的人读这一行能不能知道要不要升级、会看到什么变化"。
+
+示例见 CHANGELOG.md 里 1.1.3 起的四条。**不要**在发布说明里写调试过程、复现路径、
+"我一开始搞错了什么"这类内容 —— 那是 commit message 和 docs/FINDINGS.md 的活。
 
 ### 热包版本号
 

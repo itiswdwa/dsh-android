@@ -19,7 +19,7 @@ for dir in app assets patches payload plugin profile scripts docs; do
   rm -rf "$REPO/$dir"
   cp -a "$SRC/$dir" "$REPO/$dir"
 done
-cp "$SRC/README.md" "$SRC/THIRD_PARTY.md" "$SRC/.gitignore" "$REPO/"
+cp "$SRC/README.md" "$SRC/THIRD_PARTY.md" "$SRC/.gitignore" "$SRC/CHANGELOG.md" "$REPO/"
 # VERSION and update.json are release metadata: the app reads the manifest to
 # decide whether a hot package or a new APK is waiting.
 cp "$SRC/VERSION" "$SRC/update.json" "$SRC/HOT" "$REPO/" 2>/dev/null || true

@@ -10,7 +10,7 @@
 #
 # Needs GITHUB_TOKEN with contents:write — same token release.sh uses.
 #
-# Usage: release_hot.sh [notes-file]            # default docs/releases/hot-<hash>.md
+# Usage: release_hot.sh [section-file]          # default: CHANGELOG.md 里该版本的条目
 #        DSH_SKIP_PUSH=1 release_hot.sh         # publish without pushing update.json
 #        DSH_RELEASE_TAG=v1.2.0 release_hot.sh  # target a specific release
 set -eu
@@ -40,17 +40,16 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
 ' "$HOT")
 echo "   hot $VERSION (content $HASH)"
 
-NOTES="${1:-}"
-if [ -z "$NOTES" ]; then
-  # Notes are filed by version — docs/releases/hot-1.1.4-sp1.md — which is what
-  # the settings page shows. The content hash stays as a fallback for packages
-  # published before versions were readable.
-  for candidate in "$ROOT/docs/releases/hot-$VERSION.md" \
-                   "$ROOT/docs/releases/hot-$(echo "$HASH" | cut -c1-8).md"; do
-    [ -f "$candidate" ] && NOTES="$candidate" && break
-  done
+# Notes are rendered from CHANGELOG.md, which is the only place a release is
+# described — a version without an entry cannot be published, so the file and
+# the release page cannot drift apart.
+if [ -n "${1:-}" ]; then
+  NOTES="$1"
+else
+  NOTES="$BUILD/hot-notes.md"
+  python3 "$ROOT/scripts/release_notes.py" "$VERSION" --channel hot > "$NOTES"
 fi
-[ -n "$NOTES" ] && [ -f "$NOTES" ] || { NOTES=""; echo "   没有说明文件，正文只写热包段落标题"; }
+echo "   正文段落 $(wc -c < "$NOTES") 字节"
 
 echo "== 3/5 定位 release =="
 RELEASE_JSON="$BUILD/release.json"
