@@ -11,14 +11,15 @@ Three renderings, because a release page has to answer three different questions
 
   app          what changed in this app version (the release's own notes)
   hot          what one hot package changed
-  hot-history  every hot package published under one app version, newest first —
-               a page that shows only the newest would erase the previous ones
-               the moment the next one ships
+  hot-history  every hot package published under one app version, in publish
+               order — a page that shows only the newest would erase the previous
+               ones the moment the next one ships
 
 Writing rules, for whoever edits CHANGELOG.md next (Keep a Changelog + Common
 Changelog, which this project follows):
 
-  * group by Added / Changed / Fixed / Removed / Security, newest version first;
+  * group by Added / Changed / Fixed / Removed / Security; app versions run
+    newest-first, hot packages of one app version run sp1, sp2, … in order;
   * one bullet per change, phrased as the impact on someone using the app — say
     what was broken and what it does now, not which function was edited;
   * drop the noise: build scripts, refactors and dotfiles are not release notes;
@@ -95,13 +96,19 @@ class Changelog:
                  f"先写条目再发版 —— 更新日志是唯一的事实来源。")
 
     def hot_versions(self, app: str) -> list[str]:
-        """Hot packages of one app version, newest (highest sp) first."""
+        """Hot packages of one app version, in the order they were published.
+
+        sp1 first, not sp2: the packages are sequential deliveries on one app
+        version, so the list reads as that version's progress. (App versions
+        themselves stay newest-first — that is what a changelog reader expects
+        for releases they may have skipped over.)
+        """
         prefix = f"{app}-sp"
 
         def sp(version: str) -> int:
             return int(version.rsplit("-sp", 1)[1])
 
-        return sorted((v for v in self.versions() if v.startswith(prefix)), key=sp, reverse=True)
+        return sorted((v for v in self.versions() if v.startswith(prefix)), key=sp)
 
 
 def heading(version: str, date: str) -> str:
