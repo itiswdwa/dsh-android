@@ -4,11 +4,15 @@
     "version": "1.1.5",
     "versionCode": 10105,
     "url": "https://github.com/itiswdwa/dsh-android/releases/latest/download/dsh-android.apk",
+    "slim": "https://github.com/itiswdwa/dsh-android/releases/latest/download/dsh-android-slim.apk",
     "page": "https://github.com/itiswdwa/dsh-android/releases/latest"
   },
   "terminal": {
     "version": "2",
-    "full": "1.1.5-t2"
+    "full": "1.1.5-t2",
+    "tag": "t2",
+    "url": "https://github.com/itiswdwa/dsh-android/releases/download/t2/payload.zip",
+    "manifest": "https://github.com/itiswdwa/dsh-android/releases/download/t2/payload.manifest"
   },
   "hot": {
     "version": "1.1.5-t2-sp0",

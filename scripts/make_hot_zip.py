@@ -94,20 +94,27 @@ def next_sp(root: Path, app: str, terminal: str, digest: str, base: bool) -> int
     like a downgrade and the app's "already applied" check would skip the
     update).
 
-      same line, same payload  -> keep the number it already has
-      same line, new payload   -> the next number
-      new line                 -> 1 for a hot package, 0 for the base an app
-                                  build bakes in. A new line means a new app
-                                  version *or* a new terminal version: a hot
-                                  package is only ever applied on top of the
-                                  exact runtime it was built for.
+      base build               -> always 0. The package an APK bakes in *is* the
+                                  base of its line — that is what sp0 means, and
+                                  it stays true even when a re-release of the same
+                                  app version carries newer content than the last
+                                  published hot package.
+      same line, same payload  -> keep the number it already has (a rebuild must
+                                  not bump it and re-prompt every device)
+      same line, new payload   -> the next number (it has to rise: the app's
+                                  "already applied" check is version equality)
+      new line                 -> 1; a new line is a new app version or a new
+                                  terminal version, and a hot package only ever
+                                  applies on top of the runtime it was built for.
     """
+    if base:
+        return 0
     tracker = read_tracker(root)
     same_line = tracker.get("app") == app and str(tracker.get("terminal", "")) == terminal
     if same_line and tracker.get("hash") == digest:
         return int(tracker.get("sp", 0))
     if not same_line:
-        return 0 if base else 1
+        return 1
     return int(tracker.get("sp", 0)) + 1
 
 

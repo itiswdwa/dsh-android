@@ -52,11 +52,11 @@ window.__ModuleLoader__.load({
 			hotApplied: "已导入外部包 %s",
 			hotBakedIn: "内置热包",
 			hotImported: "已导入外部热包",
-			hotHint: "收到 dsh-hot.zip 后放进手机的 Download 目录，重新打开应用即可导入（插件、技能、沙箱脚本都能这样更新，不必重装 APK）。",
+			hotHint: "热更新只在你要求时发生：点「检查更新」用线上的包，或用「选择本地热包」挑一个手机里的 dsh-hot.zip。应用不再自动读取 Download 目录。",
 			updCheck: "检查更新",
 			updChecking: "检查中…",
 			updLatest: "已是最新（%s）",
-			updFailed: "检查失败：%s（也可以手动把 dsh-hot.zip 放进 Download 导入）",
+			updFailed: "检查失败：%s（也可以选一个本地的 dsh-hot.zip 应用）",
 			updHotTitle: "热更新可用 · %s",
 			updHotHint: "插件、技能、提示词、沙箱脚本，约 %s KB，一键应用",
 			updHotApply: "应用热更新",
@@ -124,13 +124,23 @@ window.__ModuleLoader__.load({
 			phoneAllowed: "已允许",
 			phoneDenied: "未允许",
 			phoneBall: "悬浮球",
-			phoneBallHint: "点一下说话，长按直接打字；说完确认再发送。",
+			phoneBallHint: "按住说话（松开即发送），点一下在旁边弹出输入框；拖动可移动，消息会在球上方冒泡显示。",
+			phoneBallSize: "大小（dp）",
+			phoneBallImage: "图标",
+			phoneBallBuiltin: "内置（大肥鱼）",
+			phoneBallPick: "选择图片…",
+			phoneBallImageHint: "PNG/JPG，或 Android 矢量图 XML；换外观不用重装外壳。",
 			phoneBallOn: "已开启",
 			phoneBallOff: "已关闭",
 			phoneEnable: "开启",
 			phoneDisable: "关闭",
 			phoneCurrent: "当前：应用 %s · 终端 t%s · 热包 %s",
 			phoneTerminal: "终端更新可用 · t%s（需要安装新的 APK）",
+			hotPick: "选择本地热包…",
+			termMissing: "运行时未安装",
+			termMissingHint: "这个外壳不含 rootfs：下载一次即可（约 %s MB）。装好之后，外壳更新就只有几 MB。",
+			termDownload: "下载运行时",
+			hotPicked: "已选文件：%s",
 			portHint: "沙箱内 dsh web 监听的端口；改动在服务重启后生效。",
 			apiKeyHint: "以 DEEPSEEK_API_KEY 注入沙箱环境；留空则沿用沙箱里已有的配置。"
 		};
@@ -163,11 +173,11 @@ window.__ModuleLoader__.load({
 			hotApplied: "imported %s",
 			hotBakedIn: "baked-in",
 			hotImported: "imported",
-			hotHint: "Drop a received dsh-hot.zip into the phone's Download folder and reopen the app to apply it. Plugins, skills and sandbox scripts update this way — no APK reinstall.",
+			hotHint: "A hot package is applied only when you ask: fetch the published one, or pick a dsh-hot.zip from the phone. The app no longer scans Download by itself.",
 			updCheck: "Check for updates",
 			updChecking: "Checking…",
 			updLatest: "Up to date (%s)",
-			updFailed: "Check failed: %s (you can also drop dsh-hot.zip into Download)",
+			updFailed: "Check failed: %s (you can still apply a local dsh-hot.zip)",
 			updHotTitle: "Hot update available · %s",
 			updHotHint: "Plugins, skills, prompt and sandbox scripts — about %s KB, one tap",
 			updHotApply: "Apply hot update",
@@ -235,13 +245,23 @@ window.__ModuleLoader__.load({
 			phoneAllowed: "granted",
 			phoneDenied: "not granted",
 			phoneBall: "Floating ball",
-			phoneBallHint: "Tap to dictate, long-press to type; confirm before it is sent.",
+			phoneBallHint: "Hold to talk (sending on release); tap for an input box beside it. Drag to move; the bubble above it reports what happened.",
+			phoneBallSize: "Size (dp)",
+			phoneBallImage: "Picture",
+			phoneBallBuiltin: "Built-in whale",
+			phoneBallPick: "Choose a picture…",
+			phoneBallImageHint: "PNG/JPG, or an Android vector XML — changing how it looks needs no shell update.",
 			phoneBallOn: "on",
 			phoneBallOff: "off",
 			phoneEnable: "Turn on",
 			phoneDisable: "Turn off",
 			phoneCurrent: "Installed: app %s · terminal t%s · hot %s",
 			phoneTerminal: "Terminal update available · t%s (needs a new APK)",
+			hotPick: "Pick a local package…",
+			termMissing: "Runtime not installed",
+			termMissingHint: "This shell carries no rootfs: download it once (about %s MB). Later shell updates are then a few megabytes.",
+			termDownload: "Download runtime",
+			hotPicked: "Picked: %s",
 			portHint: "Port dsh web listens on inside the sandbox; changes apply after a restart.",
 			apiKeyHint: "Injected into the sandbox as DEEPSEEK_API_KEY; leave blank to keep whatever the sandbox already has."
 		};
@@ -770,11 +790,19 @@ window.__ModuleLoader__.load({
 							t("phoneCurrent").replace("%s", app)
 								.replace("%s", String(props.terminal ?? "?"))
 								.replace("%s", current || "-")),
-						h(Button, {
-							variant: "outline", size: "sm",
-							disabled: state === "checking",
-							onClick: check
-						}, state === "checking" ? t("updChecking") : t("updCheck"))),
+						h("div", { className: "dsa-actions" },
+							h(Button, {
+								variant: "outline", size: "sm",
+								disabled: state === "checking",
+								onClick: check
+							}, state === "checking" ? t("updChecking") : t("updCheck")),
+							// The other way in: a package someone handed over, applied
+							// on purpose. The app itself never scans for one.
+							h(Button, {
+								variant: "ghost", size: "sm",
+								onClick: () => call("/hot/pick", {})
+							}, t("hotPick")))),
+					props.hotMessage ? h("p", { className: "dsa-hint" }, props.hotMessage) : null,
 					state === "done" && !hotNew && !appNew
 						? h("p", { className: "dsa-hint" }, t("updLatest").replace("%s", app))
 						: null,
@@ -802,6 +830,26 @@ window.__ModuleLoader__.load({
 											}
 										}
 									}, t("updHotApply")))))
+						: null,
+					props.terminalReady === false
+						? h("div", null,
+							h("hr", { className: "dsa-sep" }),
+							h("div", { className: "dsa-field" },
+								h("span", { className: "dsa-strong" }, t("termMissing")),
+								h("p", { className: "dsa-hint" },
+									t("termMissingHint").replace("%s", String(props.terminalMegabytes ?? "190"))),
+								props.terminalProgress
+									? h("p", { className: "dsa-hint" }, props.terminalProgress)
+									: null,
+								h("div", { className: "dsa-actions" },
+									h(Button, {
+										variant: "primary",
+										disabled: props.terminalBusy === true,
+										onClick: () => call("/terminal/fetch", {
+											url: info !== null && info.terminal !== undefined ? info.terminal.url : "",
+											manifest: info !== null && info.terminal !== undefined ? info.terminal.manifest : ""
+										})
+									}, t("termDownload")))))
 						: null,
 					terminalNew
 						? h("div", null,
@@ -952,39 +1000,55 @@ window.__ModuleLoader__.load({
 		function PhoneCard(props) {
 			const t = props.t;
 			const [state, setState] = react.useState(null);
+			const [ballSize, setBallSize] = react.useState("");
 			react.useEffect(() => {
 				if (bridge() === null) return undefined;
 				let cancelled = false;
-				call("/a11y/status")
-					.then((data) => { if (!cancelled) setState(data); })
+				// The appearance lives in the snapshot; the grants come from the
+				// accessibility status. Two calls, one card.
+				Promise.all([call("/a11y/status"), call("/snapshot")])
+					.then(([access, snapshot]) => {
+						if (cancelled) return;
+						const ball = (snapshot && snapshot.ball) || {};
+						setState(Object.assign({}, access, {
+							size: ball.size,
+							image: ball.image || ""
+						}));
+						setBallSize(String(ball.size === undefined ? 58 : ball.size));
+					})
 					.catch(() => { if (!cancelled) setState({}); });
 				return () => { cancelled = true; };
 			}, [props.tick]);
 
-			const ask = async (path) => {
+			const ask = async (path, body) => {
 				try {
-					await call(path, {});
+					await call(path, body);
+					if (props.onChanged) await props.onChanged();
 				} catch (error) {
-					/* the page is the answer; a failure here is not worth a modal */
+					/* the page (or the toast) is the answer */
 				}
 			};
-			const row = (label, ok, path, on) => h("div", { className: "dsa-toggle" },
+
+			const grantRow = (label, ok, path) => h("div", { className: "dsa-toggle" },
 				h("div", { className: "dsa-copy" },
 					h("span", { className: "dsa-title" }, label),
 					h("span", { className: "dsa-hint" }, ok ? t("phoneAllowed") : t("phoneDenied"))),
 				ok
 					? h(Tag, { tone: "success" }, t("phoneAllowed"))
-					: h(Button, { variant: "outline", size: "sm", onClick: () => ask(path) }, t("phoneGrant")));
+					: h(Button, { variant: "outline", size: "sm", onClick: () => ask(path, {}) }, t("phoneGrant")));
 
-			const ball = state !== null && state.ball === true;
-			return h(Group, { title: t("phoneTitle") },
-				h(Card, null,
-					state === null
-						? h("p", { className: "dsa-hint" }, t("busy"))
-						: h("div", null,
-							row(t("phoneScreen"), state.service === true, "/a11y/request"),
-							row(t("phoneOverlay"), state.overlay === true, "/overlay/request"),
-							row(t("phoneMic"), state.microphone === true, "/mic/request"))),
+			if (state === null) return h(Group, { title: t("phoneTitle") }, h(Card, null, h("p", { className: "dsa-hint" }, t("busy"))));
+
+			const ball = state.ball === true;
+			const image = state.image || "";
+			return h("div", null,
+				h(Group, { title: t("phoneTitle") },
+					h(Card, null,
+						grantRow(t("phoneScreen"), state.service === true, "/a11y/request"),
+						grantRow(t("phoneOverlay"), state.overlay === true, "/overlay/request"),
+						grantRow(t("phoneMic"), state.microphone === true, "/mic/request")),
+					h("p", { className: "dsa-hint" }, t("phoneHint"))),
+
 				h(Group, { title: t("phoneBall") },
 					h(Card, null,
 						h("div", { className: "dsa-spread" },
@@ -994,14 +1058,38 @@ window.__ModuleLoader__.load({
 							h(Button, {
 								variant: ball ? "outline" : "primary",
 								size: "sm",
-								onClick: async () => {
-									const data = await call(ball ? "/ball/stop" : "/ball/start", {});
-									setState(Object.assign({}, state, { ball: !ball }));
-									if (props.onChanged) await props.onChanged();
-									return data;
-								}
-							}, ball ? t("phoneDisable") : t("phoneEnable"))))),
-				h("p", { className: "dsa-hint" }, t("phoneHint")));
+								onClick: () => ask(ball ? "/ball/stop" : "/ball/start", {})
+							}, ball ? t("phoneDisable") : t("phoneEnable")))),
+
+					h(Card, null,
+						h("div", { className: "dsa-field" },
+							h("label", { className: "dsa-fieldLabel" }, t("phoneBallSize")),
+							h("div", { className: "dsa-inputRow" },
+								h(TextInput, {
+									inputMode: "numeric",
+									value: String(ballSize ?? ""),
+									onChange: (event) => setBallSize(event.target.value)
+								}),
+								h(Button, {
+									variant: "outline",
+									onClick: () => {
+										const size = parseInt(String(ballSize), 10);
+										return ask("/ball/config", { size: Number.isFinite(size) ? size : 58 });
+									}
+								}, t("save")))),
+						h("div", { className: "dsa-field" },
+							h("label", { className: "dsa-fieldLabel" }, t("phoneBallImage")),
+							h("p", { className: "dsa-hint" }, image === "" ? t("phoneBallBuiltin") : image),
+							h("div", { className: "dsa-actions" },
+								h(Button, {
+									variant: "outline", size: "sm",
+									onClick: () => ask("/ball/pick-image", {})
+								}, t("phoneBallPick")),
+								image === "" ? null : h(Button, {
+									variant: "ghost", size: "sm",
+									onClick: () => ask("/ball/config", { image: "" })
+								}, t("remove"))),
+							h("p", { className: "dsa-hint" }, t("phoneBallImageHint"))))));
 		}
 
 		/**
@@ -1140,7 +1228,11 @@ window.__ModuleLoader__.load({
 					terminal: snapshot.terminalVersion,
 					versionCode: snapshot.appVersionCode,
 					packaged: snapshot.packagedHotVersion,
-					applied: snapshot.hotVersion
+					applied: snapshot.hotVersion,
+					hotMessage: snapshot.hotMessage,
+					terminalReady: snapshot.terminalReady,
+					terminalBusy: snapshot.terminalBusy,
+					terminalProgress: snapshot.terminalProgress
 				}),
 
 				h(ExportCard, { t }),

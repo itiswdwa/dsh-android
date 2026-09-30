@@ -103,11 +103,30 @@ java -cp "$D8" com.android.tools.r8.D8 --release --min-api 26 \
   $(find "$CLASSES" -name '*.class') "$LIBS"/*.jar
 
 echo "== 5/7 pack =="
+# Two shells out of one build. The full one carries the runtime; the slim one
+# leaves it out, because the rootfs is 190 MB that only changes when the terminal
+# version does — it is published separately (release tag t<N>) and downloaded by
+# whoever needs it. Everything else in the APK is identical.
+ASSETS=""
+if [ "${SLIM:-0}" != "1" ]; then
+  ASSETS="assets/payload.zip:$BUILD/payload-assets/payload.zip
+assets/payload.manifest:$BUILD/payload-assets/payload.manifest"
+fi
+APK_NAME="dsh-android.apk"
+[ "${SLIM:-0}" = "1" ] && APK_NAME="dsh-android-slim.apk"
+# `if`, not `&&`: a false test in an `&&` list is the pipeline's exit status, and
+# under `set -e` that kills the build silently right before the pack.
+echo "$ASSETS" | while read -r line; do
+  if [ -n "$line" ] && [ ! -f "${line#*:}" ]; then
+    echo "缺少载荷：${line#*:}（先跑 make_payload_zip.py）" >&2
+    exit 1
+  fi
+done
+# shellcheck disable=SC2086
 python3 "$ROOT/scripts/pack_apk.py" "$BUILD/base.apk" "$BUILD/unsigned.apk" \
   "classes.dex:$DEX_DIR/classes.dex" \
   "lib/arm64-v8a/libproot.so:$PROOT" \
-  "assets/payload.zip:$BUILD/payload-assets/payload.zip" \
-  "assets/payload.manifest:$BUILD/payload-assets/payload.manifest" \
+  $ASSETS \
   "assets/hot.zip:$BUILD/hot-assets/hot.zip"
 
 echo "== 6/7 keystore =="
@@ -123,6 +142,6 @@ fi
 echo "== 7/7 sign =="
 javac -encoding UTF-8 -nowarn -classpath "$APKSIG" -d "$BUILD/sign" "$ROOT/scripts/Sign.java"
 java -cp "$APKSIG:$BUILD/sign" Sign \
-  "$BUILD/unsigned.apk" "$OUT/dsh-android.apk" "$KEYSTORE" "$KS_PASS" "$KS_ALIAS" "$KS_PASS"
+  "$BUILD/unsigned.apk" "$OUT/$APK_NAME" "$KEYSTORE" "$KS_PASS" "$KS_ALIAS" "$KS_PASS"
 
-ls -la "$OUT/dsh-android.apk"
+ls -la "$OUT/$APK_NAME"

@@ -26,6 +26,7 @@ if [ "${1:-}" != "" ]; then
 fi
 TAG="v$VERSION"
 APK="$ROOT/out/dsh-android.apk"
+SLIM_APK="$ROOT/out/dsh-android-slim.apk"
 HOT="$ROOT/out/dsh-hot.zip"
 SUMS="$ROOT/out/SHA256SUMS"
 
@@ -105,9 +106,17 @@ fi
 echo "== 上传资产 =="
 ( cd "$(dirname "$APK")" && sha256sum "$(basename "$APK")" "$(basename "$HOT")" > "$SUMS" )
 
-for spec in "$APK:application/vnd.android.package-archive" \
-            "$HOT:application/zip" \
-            "$SUMS:text/plain"; do
+UPLOADS="$APK:application/vnd.android.package-archive
+$HOT:application/zip
+$SUMS:text/plain"
+# Optional: the shell without the runtime. Same APK minus the 190 MB payload, for
+# phones that already have the terminal — which is every phone after the first
+# install. Absent means this release ships only the full one.
+[ -f "$SLIM_APK" ] && UPLOADS="$UPLOADS
+$SLIM_APK:application/vnd.android.package-archive"
+
+printf '%s\n' "$UPLOADS" | while IFS= read -r spec; do
+  [ -n "$spec" ] || continue
   file=${spec%%:*}
   type=${spec#*:}
   name=$(basename "$file")

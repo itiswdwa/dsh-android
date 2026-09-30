@@ -8,6 +8,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+
+import org.json.JSONObject;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -58,15 +60,6 @@ public final class Payload {
     /** Overlay archive of the small, always-current files (see scripts/make_hot_zip.py). */
     public static final String HOT_ASSET = "hot.zip";
 
-    /**
-     * Where a *received* hot package is expected to land.
-     *
-     * This is how a newer plugin or skill reaches a phone without re-sending the
-     * 143 MB APK: download the ~20 KB dsh-hot.zip, drop it in Download, open the
-     * app. Anything a hot package may write is limited to the prefixes below.
-     */
-    public static final String[] HOT_DROP_DIRS = {"Download", "Documents"};
-
     private static final String[] HOT_ALLOWED_PREFIXES = {
             "opt/dsh/android/", "opt/dsh/dsh-plugin-android/", "etc/", "@home/"
     };
@@ -85,42 +78,86 @@ public final class Payload {
         if (fromAsset >= 0) {
             App.log("hot overlay applied: " + fromAsset + " files");
         }
-        applyReceivedHot(ctx);
+        discardForeignHot();
+        // Deliberately nothing else. Packages used to be picked up from Download
+        // or Documents on every launch, which meant one stale dsh-hot.zip left in
+        // a folder silently overwrote whatever the user applied afterwards — the
+        // app looked like it "installed the old one again" out of nowhere. A hot
+        // package is now applied only when someone asks for it: the update card's
+        // online fetch, or a file the user picks (see applyFile).
     }
 
     /**
-     * Pick up a hot package the user received out of band.
+     * Forget a hot package that belongs to another line.
      *
-     * Only one whose version differs from the last one applied is unpacked, so
-     * leaving the file in Download is harmless and re-running is a no-op.
+     * A package is built for one exact `<app>-t<terminal>` pair. Once the shell
+     * or the runtime moves on, whatever is recorded from the old line describes
+     * a plugin that is no longer the newest thing on disk — the baked overlay has
+     * already replaced it at this point — so the record would only make the
+     * settings page claim a version that is not what is running.
      */
-    private static void applyReceivedHot(Context ctx) {
-        App app = App.i();
-        File shared = android.os.Environment.getExternalStorageDirectory();
-        if (shared == null) return;
-        for (String folder : HOT_DROP_DIRS) {
-            File candidate = new File(new File(shared, folder), "dsh-hot.zip");
-            if (!candidate.isFile()) continue;
-            try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(candidate)) {
-                String version = hotVersionOf(zip);
-                if (version == null) {
-                    App.log("hot package " + candidate + " has no hot.json; ignored");
-                    continue;
-                }
-                if (version.equals(app.prefs.getString(HOT_VERSION_KEY, ""))) {
-                    App.log("hot package already applied: " + version);
-                    continue;
-                }
+    private static void discardForeignHot() {
+        String applied = App.i().prefs.getString(HOT_VERSION_KEY, "");
+        if (applied.isEmpty()) return;
+        String line = App.appVersion() + "-t" + App.terminalVersion() + "-";
+        if (applied.startsWith(line)) return;
+        App.i().prefs.edit().remove(HOT_VERSION_KEY).apply();
+        hotMessage = "已清除不属于本版本的热包（" + applied + "）";
+        App.log("hot package " + applied + " is from another line; discarded");
+    }
+
+    /** Last hot-package outcome, for the update card to show after a local pick. */
+    private static volatile String hotMessage = "";
+
+    public static String hotMessage() {
+        return hotMessage;
+    }
+
+    /**
+     * Apply a package the user picked from their own storage.
+     *
+     * The other two ways in are the baked asset (this APK's own copy) and the
+     * online fetch; both are one tap. This one exists for exactly the case that
+     * made the old auto-scan so annoying: a file someone was handed, applied on
+     * purpose instead of whenever the app happened to start.
+     *
+     * @param archive a .zip the caller has already copied into app storage
+     * @return a result object shaped like the bridge's other answers
+     */
+    public static JSONObject applyFile(Context ctx, File archive) {
+        JSONObject answer = new JSONObject();
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(archive)) {
+            String version = hotVersionOf(zip);
+            if (version == null) {
+                answer.put("ok", false);
+                answer.put("error", "不是热更新包（缺 hot.json）");
+            } else if (version.equals(App.i().prefs.getString(HOT_VERSION_KEY, ""))) {
+                answer.put("ok", true);
+                answer.put("version", version);
+                answer.put("message", "已经是这个版本（" + version + "）");
+            } else {
                 int written = unpackHot(ctx, zip, version);
-                if (written >= 0) {
-                    app.prefs.edit().putString(HOT_VERSION_KEY, version).apply();
-                    App.log("received hot package applied: " + version + " (" + written + " files)");
+                if (written < 0) {
+                    answer.put("ok", false);
+                    answer.put("error", "解包失败（包内路径不在允许范围？）");
+                } else {
+                    App.i().prefs.edit().putString(HOT_VERSION_KEY, version).apply();
+                    answer.put("ok", true);
+                    answer.put("version", version);
+                    answer.put("files", written);
+                    answer.put("message", "已应用 " + version + "（" + written + " 个文件），重开应用生效");
+                    App.log("hot package applied from file: " + version);
                 }
-            } catch (IOException error) {
-                App.log("hot package " + candidate + " failed: " + error);
             }
-            return;
+        } catch (Throwable error) {
+            try {
+                answer.put("ok", false);
+                answer.put("error", "读不了这个文件：" + error.getMessage());
+            } catch (Throwable ignored) {
+            }
         }
+        hotMessage = answer.optString("message", answer.optString("error", ""));
+        return answer;
     }
 
     private static String hotVersionOf(java.util.zip.ZipFile zip) {
@@ -190,7 +227,7 @@ public final class Payload {
                 answer.put("version", version);
                 answer.put("files", written);
                 answer.put("bytes", total);
-                answer.put("message", "热更新已应用（" + version + "，" + written + " 个文件），下次打开生效");
+                answer.put("message", "已应用 " + version + "（" + written + " 个文件），重开应用生效");
                 App.log("hot update applied from " + url + ": " + version + " (" + written + " files)");
             }
             //noinspection ResultOfMethodCallIgnored
@@ -203,6 +240,7 @@ public final class Payload {
             } catch (Throwable ignored) {
             }
         }
+        hotMessage = answer.optString("message", answer.optString("error", ""));
         return answer;
     }
 
@@ -334,17 +372,19 @@ public final class Payload {
         return written;
     }
 
+    /** True when this APK carries the runtime itself (i.e. it is not the slim shell). */
+    public static boolean hasBundledPayload(Context ctx) {
+        try (InputStream probe = ctx.getAssets().open(ASSET)) {
+            return probe != null;
+        } catch (IOException error) {
+            return false;
+        }
+    }
+
     /** Extract the bundled payload when missing or stale. Safe to call twice. */
     public static void install(Context ctx, Progress progress) throws IOException {
         App app = App.i();
-        File home = app.bundledHome();
-        if (app.isBundledReady()) {
-            return;
-        }
-        deleteTree(home);
-        if (!home.mkdirs() && !home.isDirectory()) {
-            throw new IOException("cannot create " + home);
-        }
+        if (app.isBundledReady()) return;
 
         // java.util.zip needs a real file, and a staged copy also lets us verify
         // the byte count instead of trusting an asset stream.
@@ -358,15 +398,99 @@ public final class Payload {
         if (copied < 4096) {
             throw new IOException("payload asset looks empty (" + copied + " bytes)");
         }
+        File manifest = new File(app.tmpDir, MANIFEST);
+        try (InputStream raw = ctx.getAssets().open(MANIFEST);
+             OutputStream out = new FileOutputStream(manifest)) {
+            copy(raw, out, null);
+        }
+        unpack(ctx, app.bundledHome(), staged, manifest, App.PAYLOAD_VERSION, progress);
+    }
 
-        try (ZipFile zip = new ZipFile(staged)) {
+    // ------------------------------------------------- terminal, pulled on demand
+    //
+    // The slim shell ships without the runtime: the rootfs is 190 MB that only
+    // changes when the terminal version does, so it is published once per
+    // terminal (release tag `t<N>`) and downloaded by whoever needs it. Shell
+    // updates stay a few megabytes because of that split.
+
+    private static volatile String terminalProgress = "";
+    private static volatile boolean terminalBusy;
+
+    /** Human-readable progress of a runtime download, empty when idle. */
+    public static String terminalProgress() {
+        return terminalProgress;
+    }
+
+    public static boolean terminalBusy() {
+        return terminalBusy;
+    }
+
+    public static void fetchTerminal(Context ctx, String url, String manifestUrl) {
+        if (terminalBusy) return;
+        terminalBusy = true;
+        terminalProgress = "准备下载…";
+        Thread worker = new Thread(() -> {
+            try {
+                App app = App.i();
+                File staged = new File(app.tmpDir, ASSET);
+                File manifest = new File(app.tmpDir, MANIFEST);
+                download(url, staged, "运行时");
+                download(manifestUrl, manifest, "清单");
+                terminalProgress = "正在解包（这一步最久）…";
+                unpack(ctx, app.bundledHome(), staged, manifest, "t" + BuildInfo.ROOTFS_VERSION, null);
+                terminalProgress = "已安装";
+                App.log("terminal installed from " + url);
+            } catch (Throwable error) {
+                terminalProgress = "失败：" + error.getMessage();
+                App.log("terminal fetch failed: " + error);
+            } finally {
+                terminalBusy = false;
+            }
+        }, "terminal-fetch");
+        worker.setPriority(Thread.MIN_PRIORITY);
+        worker.start();
+    }
+
+    /** Stream one remote file into app storage, reporting megabytes as it goes. */
+    private static void download(String url, File target, String label) throws IOException {
+        if (url == null || url.isEmpty()) throw new IOException(label + " 地址为空");
+        java.net.HttpURLConnection connection =
+                (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        connection.setConnectTimeout(20000);
+        connection.setReadTimeout(120000);
+        connection.setInstanceFollowRedirects(true);
+        connection.setRequestProperty("User-Agent", "dsh-android/" + BuildInfo.APP_VERSION);
+        long total = connection.getContentLength();
+        long done = 0;
+        try (InputStream in = connection.getInputStream();
+             OutputStream out = new FileOutputStream(target)) {
+            byte[] buffer = new byte[1 << 16];
+            int read;
+            while ((read = in.read(buffer)) > 0) {
+                out.write(buffer, 0, read);
+                done += read;
+                if (total > 0) {
+                    terminalProgress = label + " " + (done >> 20) + "/" + (total >> 20) + " MB";
+                }
+            }
+        }
+        if (done < 4096) throw new IOException(label + " 下载不完整（" + done + " 字节）");
+    }
+
+    /** Extract a staged payload + manifest into the distro home. */
+    private static void unpack(Context ctx, File home, File stagedZip, File stagedManifest,
+                               String version, Progress progress) throws IOException {
+        deleteTree(home);
+        if (!home.mkdirs() && !home.isDirectory()) {
+            throw new IOException("cannot create " + home);
+        }
+        try (ZipFile zip = new ZipFile(stagedZip)) {
             long total = 0;
             for (Enumeration<? extends ZipEntry> scan = zip.entries(); scan.hasMoreElements(); ) {
                 total += Math.max(1, scan.nextElement().getCompressedSize());
             }
             long done = 0;
             int files = 0;
-            int links = 0;
             for (Enumeration<? extends ZipEntry> entries = zip.entries(); entries.hasMoreElements(); ) {
                 ZipEntry entry = entries.nextElement();
                 String name = entry.getName();
@@ -400,18 +524,16 @@ public final class Payload {
                 }
             }
             App.log("payload extracted: " + files + " files");
-        } finally {
-            //noinspection ResultOfMethodCallIgnored
-            staged.delete();
         }
 
-        applyManifest(ctx, home);
-
+        applyManifest(stagedManifest, home);
         writeResolvConf(home);
-        File marker = new File(home, ".payload-" + App.PAYLOAD_VERSION);
+        File marker = new File(home, ".payload-" + version);
         try (OutputStream out = new FileOutputStream(marker)) {
-            out.write(App.PAYLOAD_VERSION.getBytes(StandardCharsets.UTF_8));
+            out.write(version.getBytes(StandardCharsets.UTF_8));
         }
+        //noinspection ResultOfMethodCallIgnored
+        stagedZip.delete();
     }
 
     /**
@@ -419,10 +541,10 @@ public final class Payload {
      * manifest marks as symlinks into real ones. The zip wrote them as small
      * files holding their target path, which is exactly the data needed here.
      */
-    private static void applyManifest(Context ctx, File home) throws IOException {
+    private static void applyManifest(File manifest, File home) throws IOException {
         int links = 0;
         int modes = 0;
-        try (InputStream raw = ctx.getAssets().open(MANIFEST);
+        try (InputStream raw = new FileInputStream(manifest);
              java.io.BufferedReader reader = new java.io.BufferedReader(
                      new java.io.InputStreamReader(raw, StandardCharsets.UTF_8), 1 << 16)) {
             String line;

@@ -56,13 +56,23 @@ def main() -> None:
             "version": app,
             "versionCode": current["code"],
             "url": f"{BASE}/releases/latest/download/dsh-android.apk",
+            # The shell without the runtime: a few megabytes, for phones that
+            # already have the terminal — which is every phone after the first
+            # install. Same APK, minus assets/payload.zip + payload.manifest.
+            "slim": f"{BASE}/releases/latest/download/dsh-android-slim.apk",
             "page": f"{BASE}/releases/latest",
         },
         # The sandbox runtime has its own number: it only moves when the rootfs
         # itself changes, which is a different release from a shell change.
+        # The runtime is published once per terminal version, on a release tagged
+        # `t<N>`, so a shell release never has to upload 190 MB again. The URLs
+        # are stable for as long as the terminal version is.
         "terminal": {
             "version": current["terminal"],
             "full": current["core"],
+            "tag": f"t{current['terminal']}",
+            "url": f"{BASE}/releases/download/t{current['terminal']}/payload.zip",
+            "manifest": f"{BASE}/releases/download/t{current['terminal']}/payload.manifest",
         },
         "hot": {
             "version": hot,

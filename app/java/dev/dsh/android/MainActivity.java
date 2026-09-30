@@ -47,6 +47,8 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
     private static final int REQ_FILE = 0x1002;
     private static final int REQ_STORAGE = 0x1003;
     private static final int REQ_MOUNT = 0x1004;
+    private static final int REQ_HOT = 0x1005;
+    private static final int REQ_BALL = 0x1006;
 
     private FrameLayout root;
     private WebView web;
@@ -100,6 +102,16 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
             @Override
             public void onAssistPermission(int which) {
                 handler.post(() -> MainActivity.this.onAssistPermission(which));
+            }
+
+            @Override
+            public void onHotPickRequested() {
+                handler.post(MainActivity.this::onHotPickRequested);
+            }
+
+            @Override
+            public void onBallImageRequested() {
+                handler.post(MainActivity.this::onBallImageRequested);
             }
 
             @Override
@@ -437,6 +449,11 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
                 handler.post(() -> {
                     Toast.makeText(this, "沙箱安装完成", Toast.LENGTH_SHORT).show();
                     hideSetup();
+                    // Same step the ready path takes: the payload is the base
+                    // tree, the hot overlay is what makes it current. Without
+                    // this the very first launch runs with whatever the payload
+                    // happened to bake in.
+                    Payload.applyHot(this);
                     DshService.ensure(MainActivity.this);
                     render();
                 });
@@ -546,6 +563,94 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.putExtra(EXTRA_PROMPT, text);
         ctx.startActivity(intent);
+    }
+
+    /** Pick the floating ball's picture: a bitmap or an Android vector XML. */
+    @Override
+    public void onBallImageRequested() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                "image/*", "application/xml", "text/xml", "application/octet-stream"});
+        try {
+            startActivityForResult(intent, REQ_BALL);
+        } catch (ActivityNotFoundException error) {
+            Toast.makeText(this, "没有可用的文件选择器", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * Copy the chosen picture into app storage and point the ball at it.
+     *
+     * Copied rather than referenced: a content URI's permission is tied to the
+     * activity that received it, and the ball is drawn by a service that outlives
+     * it. The extension is kept because it decides how the file is decoded.
+     */
+    private void applyPickedBallImage(Uri uri) {
+        String name = uri.getLastPathSegment();
+        String extension = ".png";
+        if (name != null) {
+            int dot = name.lastIndexOf('.');
+            if (dot > 0) extension = name.substring(dot).toLowerCase();
+        }
+        File target = new File(App.i().getFilesDir(), "ball-icon" + extension);
+        try (InputStream in = getContentResolver().openInputStream(uri);
+             java.io.OutputStream out = new java.io.FileOutputStream(target)) {
+            if (in == null) throw new java.io.IOException("读不到这个文件");
+            byte[] buffer = new byte[65536];
+            int read;
+            while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
+        } catch (Exception error) {
+            Toast.makeText(this, "读取失败：" + error.getMessage(), Toast.LENGTH_LONG).show();
+            return;
+        }
+        App.i().prefs.edit().putString(BallService.PREF_IMAGE, target.getAbsolutePath()).apply();
+        BallService.reload(this);
+        Toast.makeText(this, "悬浮球图标已更新", Toast.LENGTH_SHORT).show();
+    }
+
+    /** Let the user choose a dsh-hot.zip from their own storage. */
+    @Override
+    public void onHotPickRequested() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                "application/zip", "application/x-zip-compressed", "application/octet-stream"});
+        try {
+            startActivityForResult(intent, REQ_HOT);
+        } catch (ActivityNotFoundException error) {
+            Toast.makeText(this, "没有可用的文件选择器", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * Apply the picked package.
+     *
+     * Copy first, then unpack: the picker hands back a content URI whose
+     * permission lasts only for this call, and unpacking walks the archive more
+     * than once.
+     */
+    private void applyPickedHot(Uri uri) {
+        File staged = new File(App.i().tmpDir, "hot-picked.zip");
+        try (InputStream in = getContentResolver().openInputStream(uri);
+             java.io.OutputStream out = new java.io.FileOutputStream(staged)) {
+            if (in == null) throw new java.io.IOException("读不到这个文件");
+            byte[] buffer = new byte[65536];
+            int read;
+            while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
+        } catch (Exception error) {
+            Toast.makeText(this, "读取失败：" + error.getMessage(), Toast.LENGTH_LONG).show();
+            return;
+        }
+        org.json.JSONObject result = Payload.applyFile(this, staged);
+        //noinspection ResultOfMethodCallIgnored
+        staged.delete();
+        Toast.makeText(this, result.optString("message", result.optString("error", "")),
+                Toast.LENGTH_LONG).show();
+        // The settings page polls the snapshot every couple of seconds, so the
+        // applied version shows up by itself; nothing to push from here.
     }
 
     @Override
@@ -776,6 +881,14 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
         if (requestCode == REQ_IMPORT) {
             if (resultCode != RESULT_OK || uri == null) return;
             importArchive(uri);
+        }
+        if (requestCode == REQ_HOT) {
+            if (resultCode != RESULT_OK || uri == null) return;
+            applyPickedHot(uri);
+        }
+        if (requestCode == REQ_BALL) {
+            if (resultCode != RESULT_OK || uri == null) return;
+            applyPickedBallImage(uri);
         }
     }
 

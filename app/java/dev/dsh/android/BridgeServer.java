@@ -52,6 +52,12 @@ public final class BridgeServer {
 
         void onShizukuPermissionRequested();
 
+        /** Open the file picker so the user can apply a hot package by hand. */
+        void onHotPickRequested();
+
+        /** Open the file picker for the floating ball's picture. */
+        void onBallImageRequested();
+
         /**
          * One of the grants the phone-assistant feature needs (see
          * {@link Assist#PERMISSION_ACCESSIBILITY} and friends). The activity owns
@@ -232,6 +238,30 @@ public final class BridgeServer {
                 respondJson(out, 200, Updates.check(request.optString("url", Updates.MANIFEST)));
                 return;
             }
+            case "/terminal/fetch": {
+                // The slim shell ships without the runtime; this pulls the one
+                // published for its terminal version. Idempotent: a second call
+                // while a download is running is ignored.
+                JSONObject answer = new JSONObject();
+                if (Payload.terminalBusy()) {
+                    answer.put("ok", true);
+                    answer.put("message", "正在下载（" + Payload.terminalProgress() + "）");
+                } else if (App.i().isBundledReady()) {
+                    answer.put("ok", true);
+                    answer.put("message", "运行时已经在位");
+                } else {
+                    Payload.fetchTerminal(App.i(), request.optString("url", ""),
+                            request.optString("manifest", ""));
+                    answer.put("ok", true);
+                    answer.put("message", "已开始下载，进度看这一行");
+                }
+                respondJson(out, 200, answer);
+                return;
+            }
+            case "/hot/pick":
+                if (host != null) host.onHotPickRequested();
+                respondJson(out, 200, ok("请在手机上选择 dsh-hot.zip"));
+                return;
             case "/hot/fetch": {
                 respondJson(out, 200, Payload.fetchAndApply(App.i(), request.optString("url", "")));
                 return;
@@ -386,6 +416,24 @@ public final class BridgeServer {
                 if (host != null) host.onAssistPermission(Assist.PERMISSION_MICROPHONE);
                 respondJson(out, 200, ok("请允许 DSH 录音"));
                 return;
+            case "/ball/config": {
+                // Appearance only — size and picture. Everything about how it
+                // behaves is code, but this is what makes tweaks to how it looks
+                // a hot package away rather than a new shell.
+                android.content.SharedPreferences.Editor edit = App.i().prefs.edit();
+                if (request.has("size")) {
+                    edit.putInt(BallService.PREF_SIZE, request.optInt("size", BallService.DEFAULT_SIZE_DP));
+                }
+                if (request.has("image")) edit.putString(BallService.PREF_IMAGE, request.optString("image", ""));
+                edit.apply();
+                BallService.reload(App.i());
+                respondJson(out, 200, ok("已应用"));
+                return;
+            }
+            case "/ball/pick-image":
+                if (host != null) host.onBallImageRequested();
+                respondJson(out, 200, ok("请选择图片或矢量图 XML"));
+                return;
             case "/ball/start":
                 BallService.start(App.i());
                 respondJson(out, 200, ok(BallService.isRunning() ? "悬浮球已开启" : "需要「显示在其他应用上层」权限"));
@@ -503,6 +551,17 @@ public final class BridgeServer {
             root.put("terminalVersion", App.terminalVersion());
             root.put("hotVersion", Payload.hotVersion());
             root.put("packagedHotVersion", Payload.packagedHotVersion());
+            root.put("hotMessage", Payload.hotMessage());
+            root.put("terminalVersion", App.terminalVersion());
+            // Is the runtime in this APK, or does it have to be fetched?
+            root.put("payloadBundled", Payload.hasBundledPayload(app));
+            root.put("terminalReady", app.isBundledReady());
+            root.put("terminalBusy", Payload.terminalBusy());
+            root.put("terminalProgress", Payload.terminalProgress());
+            JSONObject ball = new JSONObject();
+            ball.put("size", App.i().prefs.getInt(BallService.PREF_SIZE, BallService.DEFAULT_SIZE_DP));
+            ball.put("image", App.i().prefs.getString(BallService.PREF_IMAGE, ""));
+            root.put("ball", ball);
 
             JSONObject shizuku = new JSONObject();
             shizuku.put("installed", ShizukuBridge.available());

@@ -7,8 +7,15 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.res.XmlResourceParser;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.PixelFormat;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.VectorDrawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -17,11 +24,13 @@ import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.text.InputType;
+import android.util.Xml;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -29,42 +38,60 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import org.xmlpull.v1.XmlPullParser;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Locale;
 
 /**
- * The floating whale: a shortcut from "I want something done on this phone" to
- * the agent, from anywhere.
+ * The floating whale: a mouth for the agent, always one gesture away.
  *
- *   tap        dictate (speech to text), then send
- *   long-press type it instead
- *   drag       move it; it settles against the nearest edge
+ *   hold   talk (push to talk — it records while you hold it, stops when you let go)
+ *   tap    an input box appears beside it, for typing instead of speaking
+ *   drag   move it; it settles against the nearest edge
  *
- * Either way the text goes into a new session in the harness, which is where the
- * phone-control tools live — the ball is a mouth, not a second brain.
+ * A bubble above the whale says what just happened — listening, what was heard,
+ * sent, or that the mic is missing — because a ball that silently swallows a
+ * sentence is worse than no ball at all. The bubble lives in the same window as
+ * the ball, so it follows it around the screen.
  *
- * It is a foreground service with a TYPE_APPLICATION_OVERLAY window: the overlay
- * permission is the one thing a user has to grant, and there is no way around
- * asking for it (Settings.ACTION_MANAGE_OVERLAY_PERMISSION).
+ * Size and picture are configuration, not code (see {@link #PREF_SIZE} and
+ * {@link #PREF_IMAGE}): both are read from the bridge, so changing how it looks
+ * is a hot package away instead of a new shell.
  */
 public final class BallService extends Service {
 
     private static final String CHANNEL = "assistant";
     private static final int NOTIFICATION_ID = 4210;
 
+    /** Appearance, set from the settings page through `/ball/config`. */
+    static final String PREF_SIZE = "ballSizeDp";
+    static final String PREF_IMAGE = "ballImagePath";
+    static final int DEFAULT_SIZE_DP = 58;
+
     private static volatile boolean running;
 
     private WindowManager windowManager;
     private WindowManager.LayoutParams ballParams;
     private WindowManager.LayoutParams panelParams;
+    private View ballWindow;
+    private TextView bubble;
     private View ball;
     private View panel;
     private EditText input;
-    private TextView status;
+    private TextView panelStatus;
 
     private SpeechRecognizer recognizer;
     private boolean listening;
+    private boolean talking;
+    private String heard;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable hideBubble = () -> {
+        if (bubble != null) bubble.setVisibility(View.GONE);
+    };
 
     public static boolean isRunning() {
         return running;
@@ -77,6 +104,13 @@ public final class BallService extends Service {
 
     public static void stop(Context ctx) {
         ctx.stopService(new Intent(ctx, BallService.class));
+    }
+
+    /** Re-read the appearance settings by restarting the overlay. */
+    public static void reload(Context ctx) {
+        if (!running) return;
+        ctx.stopService(new Intent(ctx, BallService.class));
+        ctx.startForegroundService(new Intent(ctx, BallService.class));
     }
 
     @Override
@@ -104,12 +138,13 @@ public final class BallService extends Service {
         running = false;
         stopListening();
         hidePanel();
-        if (ball != null) {
+        handler.removeCallbacks(hideBubble);
+        if (ballWindow != null) {
             try {
-                windowManager.removeView(ball);
+                windowManager.removeView(ballWindow);
             } catch (Exception ignored) {
             }
-            ball = null;
+            ballWindow = null;
         }
         App.log("floating ball hidden");
         super.onDestroy();
@@ -143,50 +178,129 @@ public final class BallService extends Service {
 
     // -------------------------------------------------------------------- ball
 
-    private void showBall() {
-        int size = dp(58);
-        FrameLayout view = new FrameLayout(this);
-        GradientDrawable circle = new GradientDrawable();
-        circle.setShape(GradientDrawable.OVAL);
-        circle.setColor(getResources().getColor(R.color.ball_fill));
-        circle.setStroke(dp(1), getResources().getColor(R.color.ball_stroke));
-        view.setBackground(circle);
+    private int sizePx() {
+        SharedPreferences prefs = App.i().prefs;
+        int dp = prefs.getInt(PREF_SIZE, DEFAULT_SIZE_DP);
+        return dp(dp < 32 ? DEFAULT_SIZE_DP : Math.min(dp, 140));
+    }
 
-        // The brand mark, white on the fill — the same whale as the launcher icon.
+    /**
+     * The picture: whatever the user chose, else the brand mark.
+     *
+     * A vector drawable (Android's XML vector format) or any bitmap Android can
+     * decode. A missing or unreadable file falls back to the whale rather than
+     * leaving an invisible ball on screen.
+     */
+    private Drawable icon() {
+        String path = App.i().prefs.getString(PREF_IMAGE, "");
+        if (path != null && !path.isEmpty()) {
+            File file = new File(path);
+            if (file.isFile()) {
+                try {
+                    if (path.endsWith(".xml")) {
+                        try (InputStream in = new FileInputStream(file)) {
+                            XmlPullParser parser = Xml.newPullParser();
+                            parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false);
+                            parser.setInput(in, null);
+                            Drawable vector = VectorDrawable.createFromXml(getResources(), parser);
+                            if (vector != null) return vector;
+                        }
+                    }
+                    Bitmap bitmap = BitmapFactory.decodeFile(path);
+                    if (bitmap != null) return new BitmapDrawable(getResources(), bitmap);
+                } catch (Exception error) {
+                    App.log("ball icon " + path + ": " + error);
+                }
+            }
+        }
+        return getResources().getDrawable(R.drawable.ic_whale_monochrome, null);
+    }
+
+    private void showBall() {
+        int size = sizePx();
+
+        // One window holds the bubble and the ball: the bubble then moves with
+        // the ball for free, and cannot drift out of sync with it.
+        LinearLayout column = new LinearLayout(this);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        bubble = new TextView(this);
+        GradientDrawable bubbleBackground = new GradientDrawable();
+        bubbleBackground.setCornerRadius(dp(14));
+        bubbleBackground.setColor(getResources().getColor(R.color.ball_bubble));
+        bubble.setBackground(bubbleBackground);
+        bubble.setTextColor(getResources().getColor(R.color.ball_bubble_text));
+        bubble.setTextSize(12);
+        bubble.setPadding(dp(10), dp(6), dp(10), dp(6));
+        bubble.setVisibility(View.GONE);
+        bubble.setMaxWidth(dp(220));
+        LinearLayout.LayoutParams bubbleParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        bubbleParams.bottomMargin = dp(6);
+        column.addView(bubble, bubbleParams);
+
+        FrameLayout circle = new FrameLayout(this);
+        GradientDrawable fill = new GradientDrawable();
+        fill.setShape(GradientDrawable.OVAL);
+        fill.setColor(getResources().getColor(R.color.ball_fill));
+        fill.setStroke(dp(1), getResources().getColor(R.color.ball_stroke));
+        circle.setBackground(fill);
         ImageView mark = new ImageView(this);
-        mark.setImageResource(R.drawable.ic_whale_monochrome);
+        mark.setImageDrawable(icon());
+        int inset = Math.max(4, size / 6);
         FrameLayout.LayoutParams markParams = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
-        int inset = dp(9);
         markParams.setMargins(inset, inset, inset, inset);
-        view.addView(mark, markParams);
-        view.setAlpha(0.92f);
+        circle.addView(mark, markParams);
+        circle.setAlpha(0.94f);
+        column.addView(circle, new LinearLayout.LayoutParams(size, size));
 
-        ballParams = new WindowManager.LayoutParams(size, size,
+        ballWindow = column;
+        ball = circle;
+        ballParams = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT);
         ballParams.gravity = Gravity.TOP | Gravity.START;
-        ballParams.x = dp(12);
-        ballParams.y = dp(220);
-        view.setOnTouchListener(new DragListener());
-        windowManager.addView(view, ballParams);
-        ball = view;
+        ballParams.x = App.i().prefs.getInt("ballX", dp(12));
+        ballParams.y = App.i().prefs.getInt("ballY", dp(220));
+        circle.setOnTouchListener(new BallTouch());
+        windowManager.addView(ballWindow, ballParams);
     }
 
-    /** Drag to move, tap to dictate, long-press to type. */
-    private final class DragListener implements View.OnTouchListener {
+    /** Show a short status above the ball; it fades out on its own. */
+    private void say(String text, long millis) {
+        if (bubble == null) return;
+        handler.removeCallbacks(hideBubble);
+        bubble.setText(text);
+        bubble.setVisibility(View.VISIBLE);
+        if (millis > 0) handler.postDelayed(hideBubble, millis);
+    }
+
+    /**
+     * Hold to talk, tap to type, drag to move.
+     *
+     * The distinction is made on release rather than on press: a press that
+     * lasts becomes recording, one that does not becomes the input box, and
+     * movement in between turns it into a drag (which cancels whatever else it
+     * had started).
+     */
+    private final class BallTouch implements View.OnTouchListener {
         private int startX, startY;
         private float touchX, touchY;
         private boolean dragging;
-        private final Runnable longPress = new Runnable() {
+        private final Runnable holdToTalk = new Runnable() {
             @Override
             public void run() {
-                if (!dragging) {
-                    dragging = true;   // consumes this gesture: no tap on release
-                    openPanel(false);
-                }
+                if (dragging) return;
+                talking = true;
+                heard = null;
+                say(getString(R.string.ball_listening), 0);
+                startListening();
             }
         };
 
@@ -199,21 +313,26 @@ public final class BallService extends Service {
                     touchX = event.getRawX();
                     touchY = event.getRawY();
                     dragging = false;
-                    view.setAlpha(1f);
-                    handler.postDelayed(longPress, ViewConfiguration.getLongPressTimeout());
+                    ball.setAlpha(1f);
+                    // Short of the platform's long press: holding a microphone
+                    // should start recording the moment it is clearly a hold.
+                    handler.postDelayed(holdToTalk, 260);
                     return true;
                 case MotionEvent.ACTION_MOVE: {
                     int dx = (int) (event.getRawX() - touchX);
                     int dy = (int) (event.getRawY() - touchY);
                     if (!dragging && Math.hypot(dx, dy) > dp(8)) {
                         dragging = true;
-                        handler.removeCallbacks(longPress);
+                        handler.removeCallbacks(holdToTalk);
+                        stopListening();
+                        talking = false;
+                        say("", 0);
                     }
                     if (dragging) {
                         ballParams.x = startX + dx;
                         ballParams.y = startY + dy;
                         try {
-                            windowManager.updateViewLayout(view, ballParams);
+                            windowManager.updateViewLayout(ballWindow, ballParams);
                         } catch (Exception ignored) {
                         }
                     }
@@ -221,12 +340,17 @@ public final class BallService extends Service {
                 }
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
-                    handler.removeCallbacks(longPress);
-                    view.setAlpha(0.92f);
-                    if (!dragging) {
-                        openPanel(true);
-                    } else {
+                    handler.removeCallbacks(holdToTalk);
+                    ball.setAlpha(0.94f);
+                    boolean wasTalking = talking;
+                    talking = false;
+                    if (dragging) {
                         settleAgainstEdge();
+                    } else if (wasTalking) {
+                        // Releasing ends the recording; the result callback sends.
+                        stopListening(true);
+                    } else {
+                        openPanel();
                     }
                     return true;
                 default:
@@ -235,22 +359,25 @@ public final class BallService extends Service {
         }
     }
 
-    /** Leave the ball at the side it was dropped nearest, so it stops covering the middle. */
+    /** Leave the ball at the side it was dropped nearest, and remember where. */
     private void settleAgainstEdge() {
         int screen = getResources().getDisplayMetrics().widthPixels;
-        int target = ballParams.x + dp(29) > screen / 2 ? screen - dp(70) : dp(12);
+        int width = sizePx();
+        int target = ballParams.x + width / 2 > screen / 2 ? screen - width - dp(12) : dp(12);
         ballParams.x = target;
         try {
-            windowManager.updateViewLayout(ball, ballParams);
+            windowManager.updateViewLayout(ballWindow, ballParams);
         } catch (Exception ignored) {
         }
+        App.i().prefs.edit().putInt("ballX", ballParams.x).putInt("ballY", ballParams.y).apply();
     }
 
     // ------------------------------------------------------------------- panel
 
-    private void openPanel(boolean listen) {
+    /** The typing box, placed beside the ball rather than over the screen bottom. */
+    private void openPanel() {
         if (panel != null) {
-            if (listen) startListening();
+            focusInput();
             return;
         }
         LinearLayout column = new LinearLayout(this);
@@ -262,11 +389,11 @@ public final class BallService extends Service {
         column.setBackground(card);
         column.setPadding(dp(14), dp(12), dp(14), dp(12));
 
-        status = new TextView(this);
-        status.setTextColor(getResources().getColor(R.color.panel_hint));
-        status.setTextSize(12);
-        status.setText(listen ? getString(R.string.ball_listening) : getString(R.string.ball_prompt));
-        column.addView(status);
+        panelStatus = new TextView(this);
+        panelStatus.setTextColor(getResources().getColor(R.color.panel_hint));
+        panelStatus.setTextSize(12);
+        panelStatus.setText(getString(R.string.ball_prompt));
+        column.addView(panelStatus);
 
         input = new EditText(this);
         input.setHint(R.string.ball_input_hint);
@@ -288,40 +415,34 @@ public final class BallService extends Service {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         actionsParams.topMargin = dp(10);
 
-        Button mic = new Button(this);
-        mic.setText(R.string.ball_speak);
-        mic.setOnClickListener(v -> {
-            if (listening) {
-                stopListening();
-            } else {
-                startListening();
-            }
-        });
-        actions.addView(mic);
-
         Button send = new Button(this);
         send.setText(R.string.ball_send);
         send.setOnClickListener(v -> submit(input.getText().toString()));
-        LinearLayout.LayoutParams sendParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        sendParams.leftMargin = dp(8);
-        actions.addView(send, sendParams);
-        column.addView(actions, actionsParams);
+        actions.addView(send);
 
         Button close = new Button(this);
         close.setText(R.string.ball_close);
         close.setOnClickListener(v -> hidePanel());
-        column.addView(close);
+        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        closeParams.leftMargin = dp(8);
+        actions.addView(close, closeParams);
+        column.addView(actions, actionsParams);
 
-        panel = column;
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        boolean onLeft = ballParams.x + sizePx() / 2 < screenWidth / 2;
         panelParams = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
+                Math.min(dp(300), screenWidth - dp(24)),
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
-        panelParams.gravity = Gravity.BOTTOM;
+        panelParams.gravity = Gravity.TOP | Gravity.START;
+        panelParams.x = onLeft ? dp(12) : screenWidth - panelParams.width - dp(12);
+        panelParams.y = Math.max(dp(12), ballParams.y + sizePx() + dp(10));
         panelParams.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
+
+        panel = column;
         try {
             windowManager.addView(panel, panelParams);
         } catch (Exception error) {
@@ -329,8 +450,15 @@ public final class BallService extends Service {
             panel = null;
             return;
         }
-        if (listen) startListening();
-        else input.requestFocus();
+        focusInput();
+    }
+
+    private void focusInput() {
+        if (input == null) return;
+        input.requestFocus();
+        InputMethodManager keyboard =
+                (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (keyboard != null) keyboard.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT);
     }
 
     private void hidePanel() {
@@ -339,34 +467,39 @@ public final class BallService extends Service {
         View view = panel;
         panel = null;
         input = null;
-        status = null;
+        panelStatus = null;
         try {
             windowManager.removeView(view);
         } catch (Exception ignored) {
         }
     }
 
+    /** Hand the words over, and say so in the bubble. */
     private void submit(String text) {
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) {
-            if (status != null) status.setText(R.string.ball_empty);
+            say(getString(R.string.ball_empty), 2000);
             return;
         }
-        if (status != null) status.setText(getString(R.string.ball_sent));
         hidePanel();
         Assist.deliver(value);
+        say(getString(R.string.ball_sent) + "：" + shorten(value), 4000);
+    }
+
+    private static String shorten(String text) {
+        return text.length() <= 24 ? text : text.substring(0, 24) + "…";
     }
 
     // ------------------------------------------------------------------- voice
 
     private void startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            if (status != null) status.setText(R.string.ball_no_voice);
+            say(getString(R.string.ball_no_voice), 3000);
             return;
         }
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
                 != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            if (status != null) status.setText(R.string.ball_no_mic);
+            say(getString(R.string.ball_no_mic), 4000);
             return;
         }
         if (recognizer == null) recognizer = SpeechRecognizer.createSpeechRecognizer(this);
@@ -377,20 +510,30 @@ public final class BallService extends Service {
         intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
         intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
         listening = true;
-        if (status != null) status.setText(R.string.ball_listening);
         try {
             recognizer.startListening(intent);
         } catch (Exception error) {
             listening = false;
-            if (status != null) status.setText(String.valueOf(error.getMessage()));
+            say(String.valueOf(error.getMessage()), 3000);
         }
     }
 
     private void stopListening() {
+        stopListening(false);
+    }
+
+    /**
+     * End the recording.
+     *
+     * @param deliver send the transcript as soon as it arrives; false only stops
+     *                the microphone (a gesture that turned into a drag)
+     */
+    private void stopListening(boolean deliver) {
         listening = false;
         if (recognizer != null) {
             try {
-                recognizer.stopListening();
+                if (deliver) recognizer.stopListening();
+                else recognizer.cancel();
             } catch (Exception ignored) {
             }
         }
@@ -400,31 +543,39 @@ public final class BallService extends Service {
         @Override
         public void onPartialResults(android.os.Bundle partial) {
             String text = first(partial);
-            if (text != null && input != null) input.setText(text);
+            if (text != null) {
+                heard = text;
+                say(text, 0);
+            }
         }
 
         @Override
         public void onResults(android.os.Bundle results) {
             listening = false;
             String text = first(results);
-            if (text != null && input != null) {
-                input.setText(text);
-                input.setSelection(text.length());
+            if (text == null || text.trim().isEmpty()) {
+                say(getString(R.string.ball_heard_nothing), 2500);
+                return;
             }
-            // Left in the box rather than sent: a mis-heard sentence should cost
-            // one look, not one wrong instruction to an agent that acts.
-            if (status != null) status.setText(R.string.ball_review);
+            // Push-to-talk sends on release: that is the whole gesture. The
+            // bubble keeps the text on screen so a mis-hearing is visible.
+            Assist.deliver(text.trim());
+            say(getString(R.string.ball_sent) + "：" + shorten(text.trim()), 4000);
         }
 
         @Override
         public void onError(int code) {
             listening = false;
-            if (status != null) {
-                status.setText(code == SpeechRecognizer.ERROR_NO_MATCH
-                        || code == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
-                        ? getString(R.string.ball_heard_nothing)
-                        : getString(R.string.ball_voice_failed) + " (" + code + ")");
+            if (heard != null && !heard.trim().isEmpty()) {
+                Assist.deliver(heard.trim());
+                say(getString(R.string.ball_sent) + "：" + shorten(heard.trim()), 4000);
+                return;
             }
+            say(code == SpeechRecognizer.ERROR_NO_MATCH
+                            || code == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                            ? getString(R.string.ball_heard_nothing)
+                            : getString(R.string.ball_voice_failed) + " (" + code + ")",
+                    3000);
         }
 
         private String first(android.os.Bundle bundle) {

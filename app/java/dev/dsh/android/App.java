@@ -245,8 +245,21 @@ public final class App extends Application {
         return new File(distrosDir, BUNDLED_ID);
     }
 
+    /**
+     * Has the runtime been unpacked?
+     *
+     * Any `.payload-*` marker counts, not just this build's own: the slim shell
+     * carries no payload at all, so its runtime arrives by download (or by the
+     * import flow) and is marked with whatever it identifies itself as.
+     */
     public boolean isBundledReady() {
-        return new File(bundledHome(), ".payload-" + PAYLOAD_VERSION).isFile();
+        File home = bundledHome();
+        String[] markers = home.isDirectory() ? home.list() : null;
+        if (markers == null) return false;
+        for (String name : markers) {
+            if (name.startsWith(".payload-")) return true;
+        }
+        return false;
     }
 
     /** True once the user has granted the legacy read/write permission. */

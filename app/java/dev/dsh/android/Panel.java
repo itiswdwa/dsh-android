@@ -62,6 +62,12 @@ public final class Panel {
          *              {@link Assist#PERMISSION_MICROPHONE}
          */
         void onAssistPermission(int which);
+
+        /** Open the file picker so the user can apply a hot package by hand. */
+        void onHotPickRequested();
+
+        /** Open the file picker for the floating ball's picture. */
+        void onBallImageRequested();
     }
 
     // Resolved from resources, so values-night/ decides light vs dark. The app

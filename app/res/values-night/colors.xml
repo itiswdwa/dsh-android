@@ -16,5 +16,8 @@
     <color name="panel_stroke">#33FFFFFF</color>
     <color name="panel_text">#FFE8EAED</color>
     <color name="panel_hint">#FF9AA0A6</color>
+    <!-- 悬浮球上方的气泡 -->
+    <color name="ball_bubble">#FF2B2F36</color>
+    <color name="ball_bubble_text">#FFFFFFFF</color>
 </resources>
 
