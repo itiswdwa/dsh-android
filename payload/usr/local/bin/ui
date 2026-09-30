@@ -1,0 +1,167 @@
+#!/usr/bin/env node
+/**
+ * ui — look at, and act on, the phone's screen from inside the sandbox.
+ *
+ *   ui status                      # 无障碍开没开、悬浮球在不在
+ *   ui tree [--text]               # 当前屏幕上的可点/可输入控件（默认只列交互控件）
+ *   ui click "发送"                 # 按文字点，比坐标稳
+ *   ui tap 540 1200                # 按坐标点（坐标由 tree 给出）
+ *   ui type "你好"                  # 往当前输入框输入
+ *   ui key back|home|recents|notifications|lock
+ *   ui swipe 540 1800 540 600 300  # 起点终点与时长(ms)
+ *   ui open 微信                    # 按应用名或包名启动
+ *   ui ball start|stop             # 悬浮球开关
+ *
+ * 与 `shiz` 的分工：shiz 走 Shizuku 的 shell，快、能装 APK、能改设置；ui 走无障碍，
+ * 不需要额外授权，而且看得见界面 —— 处理"屏幕上的那个按钮"用它。
+ *
+ * Exit codes: 0 ok, 1 the action failed (message on stderr), 2 bridge/protocol trouble.
+ */
+import { existsSync, readFileSync } from "node:fs";
+
+const BRIDGE_EXIT = 2;
+
+function findBridge() {
+  const url = process.env.DSH_ANDROID_BRIDGE_URL;
+  const token = process.env.DSH_ANDROID_BRIDGE_TOKEN;
+  if (url && token) return { url, token };
+  for (const path of ["/etc/dsh-android/bridge.env", "/root/.dsh-android-bridge.env"]) {
+    if (!existsSync(path)) continue;
+    const values = {};
+    for (const line of readFileSync(path, "utf8").split("\n")) {
+      const match = /^\s*([A-Z_]+)\s*=\s*(.*)\s*$/.exec(line);
+      if (match) values[match[1]] = match[2].replace(/^["']|["']$/g, "");
+    }
+    if (values.DSH_ANDROID_BRIDGE_URL && values.DSH_ANDROID_BRIDGE_TOKEN) {
+      return { url: values.DSH_ANDROID_BRIDGE_URL, token: values.DSH_ANDROID_BRIDGE_TOKEN };
+    }
+  }
+  console.error("ui: 找不到控制桥（DSH_ANDROID_BRIDGE_URL/TOKEN，或 /etc/dsh-android/bridge.env）");
+  process.exit(BRIDGE_EXIT);
+}
+
+async function call(path, body) {
+  const bridge = findBridge();
+  const response = await fetch(bridge.url + path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: Object.assign({ "X-Dsh-Token": bridge.token },
+      body === undefined ? {} : { "Content-Type": "application/json" }),
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    console.error("ui: 桥的响应不是 JSON：" + text.slice(0, 200));
+    process.exit(BRIDGE_EXIT);
+  }
+  return data;
+}
+
+function fail(message) {
+  console.error("ui: " + message);
+  process.exit(1);
+}
+
+/** Nodes the model can act on, one per line: what it is, where, what it can do. */
+function renderTree(data) {
+  if (data.ok !== true) fail(data.error || "读不到屏幕");
+  const lines = [`# ${data.package || "?"}（${data.count} 个可操作控件）`];
+  for (const node of data.nodes ?? []) {
+    const can = (node.can ?? []).join(",");
+    const at = (node.at ?? []).join(",");
+    const text = node.text ? JSON.stringify(node.text) : "";
+    const id = node.id ? "#" + node.id : "";
+    lines.push(`  [${at}] ${node.class}${id} ${can} ${text}`.trimEnd());
+  }
+  return lines.join("\n");
+}
+
+async function main() {
+  const argv = process.argv.slice(2);
+  const command = argv[0];
+  const rest = argv.slice(1);
+
+  switch (command) {
+    case "status": {
+      const state = await call("/a11y/status");
+      console.log([
+        `无障碍服务：${state.service ? "已开启" : "未开启"}`,
+        `悬浮窗权限：${state.overlay ? "已允许" : "未允许"}`,
+        `麦克风：${state.microphone ? "已允许" : "未允许"}`,
+        `悬浮球：${state.ball ? "开着" : "关着"}`,
+        `屏幕：${state.screen || "?"}`,
+      ].join("\n"));
+      if (!state.service) {
+        console.error("提示：让用户在 设置 → 安卓沙箱 → 手机助手 里开启无障碍");
+      }
+      return;
+    }
+    case "tree":
+      console.log(renderTree(await call("/a11y/tree", { text: rest.includes("--text") })));
+      return;
+    case "tap": {
+      const [x, y] = rest.map(Number);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) fail("用法：ui tap <x> <y>（坐标从 ui tree 里取）");
+      console.log((await call("/a11y/tap", { x, y })).message ?? "ok");
+      return;
+    }
+    case "click": {
+      if (!rest.length) fail('用法：ui click "<控件上的文字>"');
+      console.log((await call("/a11y/click", { label: rest.join(" ") })).message ?? "ok");
+      return;
+    }
+    case "type": {
+      if (!rest.length) fail('用法：ui type "<要输入的内容>"');
+      console.log((await call("/a11y/type", { text: rest.join(" ") })).message ?? "ok");
+      return;
+    }
+    case "key": {
+      console.log((await call("/a11y/key", { name: rest[0] ?? "" })).message ?? "ok");
+      return;
+    }
+    case "swipe": {
+      const [x1, y1, x2, y2, ms] = rest.map(Number);
+      if ([x1, y1, x2, y2].some((value) => !Number.isFinite(value))) {
+        fail("用法：ui swipe <x1> <y1> <x2> <y2> [ms]");
+      }
+      console.log((await call("/a11y/swipe", { x1, y1, x2, y2, ms: Number.isFinite(ms) ? ms : 300 })).message ?? "ok");
+      return;
+    }
+    case "open": {
+      if (!rest.length) fail('用法：ui open "<应用名或包名>"');
+      console.log((await call("/a11y/open", { app: rest.join(" ") })).message ?? "ok");
+      return;
+    }
+    case "ball": {
+      console.log((await call(rest[0] === "stop" ? "/ball/stop" : "/ball/start", {})).message ?? "ok");
+      return;
+    }
+    case "permission": {
+      const which = rest[0];
+      const path = which === "overlay" ? "/overlay/request"
+        : which === "mic" ? "/mic/request" : "/a11y/request";
+      console.log((await call(path, {})).message ?? "ok");
+      return;
+    }
+    default:
+      console.log(`ui — 用无障碍看屏幕、点屏幕
+
+  ui status                      当前状态（服务/悬浮窗/麦克风/屏幕尺寸）
+  ui tree [--text]               屏幕上的控件；--text 连纯文本一起列
+  ui click "发送"                 按文字点（推荐）
+  ui tap X Y                     按坐标点
+  ui type "内容"                  输入到当前输入框
+  ui key <back|home|recents|notifications|lock>
+  ui swipe X1 Y1 X2 Y2 [ms]      滑动
+  ui open "微信"                  启动应用
+  ui ball start|stop             悬浮球开关
+  ui permission [a11y|overlay|mic]  让应用弹出相应的授权页`);
+  }
+}
+
+main().catch((error) => {
+  console.error("ui: " + (error && error.message ? error.message : String(error)));
+  process.exit(BRIDGE_EXIT);
+});

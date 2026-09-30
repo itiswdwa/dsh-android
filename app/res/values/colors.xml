@@ -14,4 +14,12 @@
     <color name="console_accent">#FF2563EB</color>
     <color name="console_danger">#FFD93025</color>
     <color name="console_ok">#FF188038</color>
+    <!-- 悬浮球与它的输入面板 -->
+    <color name="ball_fill">#FF4C6FFF</color>
+    <color name="ball_stroke">#33FFFFFF</color>
+    <color name="panel_fill">#FFFFFFFF</color>
+    <color name="panel_stroke">#1A000000</color>
+    <color name="panel_text">#FF1F2329</color>
+    <color name="panel_hint">#FF6B7280</color>
 </resources>
+

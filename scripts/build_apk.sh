@@ -11,6 +11,9 @@ set -eu
 # Override with DSH_SRC_DIR when driving it from a separate build directory.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_VERSION="${APP_VERSION:-$(cat "$ROOT/VERSION" 2>/dev/null || echo 1.0.0)}"
+# The sandbox runtime's own number, independent of the app version on purpose: a
+# shell release that does not touch the runtime keeps the same terminal line.
+TERMINAL_VERSION="${TERMINAL_VERSION:-$(cat "$ROOT/ROOTFS_VERSION" 2>/dev/null || echo 1)}"
 APP="$ROOT/app"
 BUILD="$ROOT/build"
 OUT="$ROOT/out"
@@ -59,11 +62,12 @@ echo "== update manifest =="
 python3 "$ROOT/scripts/make_update_manifest.py" "$ROOT"
 
 echo "== 3/7 javac =="
-python3 - "$BUILD/payload-assets/payload.zip" "$SRC_JAVA/dev/dsh/android/BuildInfo.java" "$APP_VERSION" <<'GEN'
+python3 - "$BUILD/payload-assets/payload.zip" "$SRC_JAVA/dev/dsh/android/BuildInfo.java" "$APP_VERSION" "$TERMINAL_VERSION" <<'GEN'
 import hashlib, pathlib, sys
 archive = pathlib.Path(sys.argv[1])
 digest = hashlib.sha256(archive.read_bytes()).hexdigest()[:16]
 version = sys.argv[3].strip()   # version string, not a path
+terminal = sys.argv[4].strip()
 code = 0
 for part in version.split(".")[:3]:
     code = code * 100 + int(part)
@@ -75,10 +79,11 @@ target.write_text(
     f'    static final String PAYLOAD_VERSION = "{digest}";\n'
     f'    static final String APP_VERSION = "{version}";\n'
     f"    static final int APP_VERSION_CODE = {code};\n"
+    f'    static final String ROOTFS_VERSION = "{terminal}";\n'
     "}\n",
     encoding="utf-8",
 )
-print(f"   app {version}, payload hash {digest}")
+print(f"   app {version}, terminal t{terminal}, payload hash {digest}")
 GEN
 find "$SRC_JAVA" -name '*.java' > "$BUILD/sources.txt"
 # aapt2 --java wrote R.java in step 2; javac must compile it too, and the append

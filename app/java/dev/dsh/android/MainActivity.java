@@ -2,6 +2,7 @@ package dev.dsh.android;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
@@ -20,6 +21,8 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.FrameLayout;
+
+import org.json.JSONObject;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -65,9 +68,17 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
     private boolean startRequested;
     private ServerBus.State lastState;
 
+    /** The activity a service can hand text to; null once it is gone. */
+    private static MainActivity live;
+    /** Prompt waiting for a loaded page. */
+    private static String pendingPrompt;
+    private static final String EXTRA_PROMPT = "dsh.prompt";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        live = this;
+        pendingPrompt = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_PROMPT);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         root = new FrameLayout(this);
         root.setBackgroundColor(bootColor());
@@ -84,6 +95,11 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
             @Override
             public void onImportRequested() {
                 handler.post(MainActivity.this::onImport);
+            }
+
+            @Override
+            public void onAssistPermission(int which) {
+                handler.post(() -> MainActivity.this.onAssistPermission(which));
             }
 
             @Override
@@ -197,6 +213,14 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
                 injectBridge();
                 // The phone-layout patch closes the session drawer on selection;
                 // nothing to inject here, the payload already ships it.
+                // A prompt that arrived while the page was still loading (the
+                // floating ball can be used before the app is even open) goes in
+                // now, when there is a composer to receive it.
+                if (pendingPrompt != null) {
+                    String queued = pendingPrompt;
+                    pendingPrompt = null;
+                    deliver(queued);
+                }
             }
         });
         web.setWebChromeClient(new WebChromeClient() {
@@ -485,6 +509,64 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
      * `window.DshAndroid.pty.url` directly, and so it is re-injected on every
      * navigation (the page is same-origin loopback, nothing else can read it).
      */
+    /**
+     * Hand text from the floating ball (or any other surface) to the harness.
+     *
+     * Delivered by calling into the page rather than by driving the DOM from
+     * Java: the plugin owns `window.__dshAndroidPrompt`, it can start a session
+     * with the harness's own client API, and the whole path stays hot-updatable.
+     * Called on the UI thread only.
+     */
+    private void deliver(final String text) {
+        if (text == null || text.trim().isEmpty()) return;
+        runOnUiThread(() -> {
+            if (web == null || !pageReady) {
+                pendingPrompt = text;
+                return;
+            }
+            injectBridge();
+            web.evaluateJavascript(
+                    "(function(){try{return window.__dshAndroidPrompt ? window.__dshAndroidPrompt("
+                            + JSONObject.quote(text) + ") : 'no-hook'}catch(e){return String(e)}})()",
+                    value -> App.log("prompt delivery: " + value));
+        });
+    }
+
+    /** Used by {@link Assist#deliver}, which has no activity of its own. */
+    static void deliverPrompt(String text) {
+        if (text == null || text.trim().isEmpty()) return;
+        MainActivity activity = live;
+        if (activity != null) {
+            activity.deliver(text);
+            return;
+        }
+        // Cold: bring the app up and hand it over once the page has loaded.
+        Context ctx = App.i();
+        Intent intent = new Intent(ctx, MainActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        intent.putExtra(EXTRA_PROMPT, text);
+        ctx.startActivity(intent);
+    }
+
+    @Override
+    public void onAssistPermission(int which) {
+        if (which == Assist.PERMISSION_MICROPHONE) {
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, 41);
+            return;
+        }
+        Intent intent = new Intent(which == Assist.PERMISSION_OVERLAY
+                ? android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION
+                : android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS);
+        if (which == Assist.PERMISSION_OVERLAY) {
+            intent.setData(android.net.Uri.parse("package:" + getPackageName()));
+        }
+        try {
+            startActivity(intent);
+        } catch (Exception error) {
+            App.log("assist permission page: " + error);
+        }
+    }
+
     private void injectBridge() {
         App app = App.i();
         String script = "window.DshAndroid={version:1"
@@ -829,8 +911,17 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
     }
 
     @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (intent != null && intent.getStringExtra(EXTRA_PROMPT) != null) {
+            deliver(intent.getStringExtra(EXTRA_PROMPT));
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         ServerBus.removeListener(this);
+        if (live == this) live = null;
         super.onDestroy();
     }
 

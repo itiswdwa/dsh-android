@@ -46,7 +46,7 @@ window.__ModuleLoader__.load({
 			mountRestart: "重启服务以生效",
 			mountRestarted: "已请求重启，几秒后再看沙箱里的目录",
 			export: "导出",
-			verLine: "应用 %s · 热包 %s · %s",
+			verLine: "%s · %s",
 			hotTitle: "热更新包",
 			hotCurrent: "当前：内置 %s",
 			hotApplied: "已导入外部包 %s",
@@ -114,6 +114,23 @@ window.__ModuleLoader__.load({
 			mountEnable: "启用",
 			mountDisable: "停用",
 			mountDisabled: "已停用",
+			ballDisabled: "已停用",
+			phoneTitle: "手机助手",
+			phoneHint: "打开下面几项，就能直接让助手看屏幕、点按钮、在别的应用里打字。",
+			phoneScreen: "无障碍（读屏、点击、输入）",
+			phoneOverlay: "悬浮窗（悬浮球）",
+			phoneMic: "麦克风（语音输入）",
+			phoneGrant: "去开启",
+			phoneAllowed: "已允许",
+			phoneDenied: "未允许",
+			phoneBall: "悬浮球",
+			phoneBallHint: "点一下说话，长按直接打字；说完确认再发送。",
+			phoneBallOn: "已开启",
+			phoneBallOff: "已关闭",
+			phoneEnable: "开启",
+			phoneDisable: "关闭",
+			phoneCurrent: "当前：应用 %s · 终端 t%s · 热包 %s",
+			phoneTerminal: "终端更新可用 · t%s（需要安装新的 APK）",
 			portHint: "沙箱内 dsh web 监听的端口；改动在服务重启后生效。",
 			apiKeyHint: "以 DEEPSEEK_API_KEY 注入沙箱环境；留空则沿用沙箱里已有的配置。"
 		};
@@ -140,7 +157,7 @@ window.__ModuleLoader__.load({
 			mountRestart: "Restart the server to apply",
 			mountRestarted: "Restart requested; check the directory in a few seconds",
 			export: "Export",
-			verLine: "app %s · hot %s · %s",
+			verLine: "%s · %s",
 			hotTitle: "Hot package",
 			hotCurrent: "packaged %s",
 			hotApplied: "imported %s",
@@ -208,6 +225,23 @@ window.__ModuleLoader__.load({
 			mountEnable: "Enable",
 			mountDisable: "Disable",
 			mountDisabled: "disabled",
+			ballDisabled: "disabled",
+			phoneTitle: "Phone assistant",
+			phoneHint: "Grant the three below and the agent can read the screen, tap controls and type into other apps.",
+			phoneScreen: "Accessibility (read screen, tap, type)",
+			phoneOverlay: "Draw over other apps (the floating ball)",
+			phoneMic: "Microphone (voice input)",
+			phoneGrant: "Grant",
+			phoneAllowed: "granted",
+			phoneDenied: "not granted",
+			phoneBall: "Floating ball",
+			phoneBallHint: "Tap to dictate, long-press to type; confirm before it is sent.",
+			phoneBallOn: "on",
+			phoneBallOff: "off",
+			phoneEnable: "Turn on",
+			phoneDisable: "Turn off",
+			phoneCurrent: "Installed: app %s · terminal t%s · hot %s",
+			phoneTerminal: "Terminal update available · t%s (needs a new APK)",
 			portHint: "Port dsh web listens on inside the sandbox; changes apply after a restart.",
 			apiKeyHint: "Injected into the sandbox as DEEPSEEK_API_KEY; leave blank to keep whatever the sandbox already has."
 		};
@@ -712,15 +746,30 @@ window.__ModuleLoader__.load({
 			};
 			react.useEffect(() => { check(); }, []);
 
+			// A hot package belongs to one exact line — "<app>-t<terminal>-sp<n>".
+			// Offering one from a different line would put a newer plugin on an
+			// older shell, where the endpoints it calls do not exist yet; the app
+			// update below is the right answer for that case.
+			const line = (props.app ?? "") + "-t" + (props.terminal ?? "") + "-";
+			const sameLine = (value) => value === "" || String(value).indexOf(line) === 0;
 			const hotNew = info !== null && info.hot !== undefined && info.hot.version !== ""
+				&& sameLine(info.hot.version)
 				&& info.hot.version !== current && info.hot.version !== packaged;
 			const appNew = info !== null && info.app !== undefined
 				&& (info.app.versionCode ?? 0) > versionCode;
+			// The sandbox runtime has its own number and only ever ships inside an
+			// APK, so a newer terminal reads as "install the new shell", not as
+			// something to download here.
+			const terminalNew = info !== null && info.terminal !== undefined
+				&& Number(info.terminal.version ?? 0) > Number(props.terminal ?? 0);
 
 			return h(Group, { title: t("hotTitle") },
 				h(Card, null,
 					h("div", { className: "dsa-spread" },
-						h("span", { className: "dsa-desc" }, t("updChannels").replace("%s", app).replace("%s", current || "-")),
+						h("span", { className: "dsa-desc" },
+							t("phoneCurrent").replace("%s", app)
+								.replace("%s", String(props.terminal ?? "?"))
+								.replace("%s", current || "-")),
 						h(Button, {
 							variant: "outline", size: "sm",
 							disabled: state === "checking",
@@ -753,6 +802,18 @@ window.__ModuleLoader__.load({
 											}
 										}
 									}, t("updHotApply")))))
+						: null,
+					terminalNew
+						? h("div", null,
+							h("hr", { className: "dsa-sep" }),
+							h("div", { className: "dsa-field" },
+								h("span", { className: "dsa-strong" },
+									t("phoneTerminal").replace("%s", String(info.terminal.version))),
+								h("div", { className: "dsa-actions" },
+									h(Button, {
+										variant: "outline",
+										onClick: () => call("/open-url", { url: info.app.page ?? info.app.url })
+									}, t("updAppDownload")))))
 						: null,
 					appNew
 						? h("div", null,
@@ -879,6 +940,109 @@ window.__ModuleLoader__.load({
 						}, t("save")))));
 		}
 
+
+		/**
+		 * The phone-assistant grants, in the order they are needed.
+		 *
+		 * None of the three can be granted by the app itself — two are system
+		 * settings pages and one is a runtime permission — so each row says what
+		 * it buys and hands the user to the right screen. The screen-control
+		 * channel the agent actually calls is `ui` (see the phone-control skill).
+		 */
+		function PhoneCard(props) {
+			const t = props.t;
+			const [state, setState] = react.useState(null);
+			react.useEffect(() => {
+				if (bridge() === null) return undefined;
+				let cancelled = false;
+				call("/a11y/status")
+					.then((data) => { if (!cancelled) setState(data); })
+					.catch(() => { if (!cancelled) setState({}); });
+				return () => { cancelled = true; };
+			}, [props.tick]);
+
+			const ask = async (path) => {
+				try {
+					await call(path, {});
+				} catch (error) {
+					/* the page is the answer; a failure here is not worth a modal */
+				}
+			};
+			const row = (label, ok, path, on) => h("div", { className: "dsa-toggle" },
+				h("div", { className: "dsa-copy" },
+					h("span", { className: "dsa-title" }, label),
+					h("span", { className: "dsa-hint" }, ok ? t("phoneAllowed") : t("phoneDenied"))),
+				ok
+					? h(Tag, { tone: "success" }, t("phoneAllowed"))
+					: h(Button, { variant: "outline", size: "sm", onClick: () => ask(path) }, t("phoneGrant")));
+
+			const ball = state !== null && state.ball === true;
+			return h(Group, { title: t("phoneTitle") },
+				h(Card, null,
+					state === null
+						? h("p", { className: "dsa-hint" }, t("busy"))
+						: h("div", null,
+							row(t("phoneScreen"), state.service === true, "/a11y/request"),
+							row(t("phoneOverlay"), state.overlay === true, "/overlay/request"),
+							row(t("phoneMic"), state.microphone === true, "/mic/request"))),
+				h(Group, { title: t("phoneBall") },
+					h(Card, null,
+						h("div", { className: "dsa-spread" },
+							h("div", { className: "dsa-copy" },
+								h("span", { className: "dsa-title" }, ball ? t("phoneBallOn") : t("phoneBallOff")),
+								h("span", { className: "dsa-hint" }, t("phoneBallHint"))),
+							h(Button, {
+								variant: ball ? "outline" : "primary",
+								size: "sm",
+								onClick: async () => {
+									const data = await call(ball ? "/ball/stop" : "/ball/start", {});
+									setState(Object.assign({}, state, { ball: !ball }));
+									if (props.onChanged) await props.onChanged();
+									return data;
+								}
+							}, ball ? t("phoneDisable") : t("phoneEnable"))))),
+				h("p", { className: "dsa-hint" }, t("phoneHint")));
+		}
+
+		/**
+		 * Where the floating ball's words end up.
+		 *
+		 * The app (Java) owns the overlay and the microphone; it hands the text
+		 * over by calling this on the page, which keeps the harness side
+		 * hot-updatable and out of the app's hands. The composer is driven
+		 * through the DOM rather than a private client API — the harness has no
+		 * supported "send this for me" entry point, and a native setter plus an
+		 * input event is what React needs to accept a programmatic value.
+		 *
+		 * Returns a short status string, which the app only logs.
+		 */
+		function installPromptHook() {
+			window.__dshAndroidPrompt = function (text) {
+				const value = String(text ?? "").trim();
+				if (value === "") return "empty";
+				const composer = document.querySelector("textarea");
+				if (composer === null) {
+					// A panel is up, or the app is showing something else: leave the
+					// words on the clipboard instead of losing them.
+					try {
+						navigator.clipboard.writeText(value);
+						return "clipboard";
+					} catch (error) {
+						return "no-composer";
+					}
+				}
+				const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+				setter.call(composer, value);
+				composer.dispatchEvent(new Event("input", { bubbles: true }));
+				composer.focus();
+				const send = Array.prototype.slice.call(document.querySelectorAll("button"))
+					.find((button) => /发送|Send/i.test(button.getAttribute("aria-label") ?? ""));
+				if (send === null) return "filled";
+				send.click();
+				return "sent";
+			};
+		}
+
 		function AndroidSection(props) {
 			const t = (key) => props.t(key);
 			const [snapshot, setSnapshot] = react.useState(null);
@@ -939,9 +1103,11 @@ window.__ModuleLoader__.load({
 				// indistinguishable from a feature that was never written.
 				h("p", {
 					className: "dsa-meta",
-					"data-dsh-android-version": (snapshot.appVersion ?? "") + "/" + (snapshot.hotVersion || snapshot.packagedHotVersion || "")
+					// The whole version in one string: shell, sandbox runtime, hot
+					// package. This is what a bug report quotes.
+					"data-dsh-android-version": (snapshot.appVersion ?? "") + "-t" + (snapshot.terminalVersion ?? "?")
+						+ "/" + String(snapshot.hotVersion || snapshot.packagedHotVersion || "")
 				}, t("verLine")
-					.replace("%s", snapshot.appVersion ?? "?")
 					.replace("%s", String(snapshot.hotVersion || snapshot.packagedHotVersion || "-"))
 					.replace("%s", hotState)),
 
@@ -971,6 +1137,7 @@ window.__ModuleLoader__.load({
 				h(UpdateCard, {
 					t,
 					app: snapshot.appVersion,
+					terminal: snapshot.terminalVersion,
 					versionCode: snapshot.appVersionCode,
 					packaged: snapshot.packagedHotVersion,
 					applied: snapshot.hotVersion
@@ -981,6 +1148,8 @@ window.__ModuleLoader__.load({
 				h(MountsCard, { t, mounts: snapshot.mounts, onChanged: reload }),
 
 				h(ShizukuCard, { shizuku: snapshot.shizuku, t, act }),
+
+				h(PhoneCard, { t, tick, onChanged: reload }),
 
 				h(SettingsCard, { settings: snapshot.settings, t, onSaved: reload }),
 
@@ -1386,6 +1555,14 @@ window.__ModuleLoader__.load({
 			// The page draws itself in the shell's vocabulary, so its stylesheet
 			// rides the same effect: mounted with the plugin, removed with it.
 			ctx.effect(() => mountStyles(), "dsh-plugin-android: page styles");
+			// The floating ball and the app's own handover both look for this
+			// global; it is installed once, with the plugin.
+			ctx.effect(() => {
+				installPromptHook();
+				return () => {
+					delete window.__dshAndroidPrompt;
+				};
+			}, "dsh-plugin-android: prompt hook");
 			ctx.slots.inject("settings.section", () => ctx.slots.register({
 				name: "settings.section",
 				id: "android",

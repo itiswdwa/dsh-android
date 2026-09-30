@@ -3,9 +3,14 @@
 
 Two independent channels, because they cost the user different things:
 
-  app  the shell: UI, icons, new bridge endpoints. ~143 MB, needs an APK install.
-  hot  plugins, skills, the sandbox prompt and guest scripts. ~50 KB, applied
-       in place — no reinstall, and the user's sessions and credentials survive.
+  app       the shell: UI, icons, new bridge endpoints. ~143 MB, needs an APK
+            install.
+  terminal  the runtime in the sandbox (rootfs, node, dsh, installed tools). It
+            has a version of its own that does not move with the app version;
+            shipping a new one means a new payload, i.e. a new APK.
+  hot       plugins, skills, the sandbox prompt and guest scripts. ~50 KB,
+            applied in place — no reinstall, and the user's sessions and
+            credentials survive.
 
 Both are served from the repository's latest release, so publishing one release
 with two assets is enough; nothing else has to be hosted.
@@ -19,6 +24,9 @@ import json
 import sys
 import zipfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import version  # noqa: E402  (sibling script: the one definition of the version model)
 
 REPO = "itiswdwa/dsh-android"
 BASE = f"https://github.com/{REPO}"
@@ -35,24 +43,26 @@ def hot_version(hot_zip: Path) -> str:
             return ""
 
 
-def version_code(version: str) -> int:
-    code = 0
-    for part in version.split(".")[:3]:
-        code = code * 100 + int(part)
-    return code
 
 
 def main() -> None:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
-    version = (root / "VERSION").read_text(encoding="utf-8").strip()
+    current = version.read(root)
+    app = current["app"]
     hot = hot_version(root / "build" / "hot-assets" / "hot.zip")
     manifest = {
-        "schema": 1,
+        "schema": 2,
         "app": {
-            "version": version,
-            "versionCode": version_code(version),
+            "version": app,
+            "versionCode": current["code"],
             "url": f"{BASE}/releases/latest/download/dsh-android.apk",
             "page": f"{BASE}/releases/latest",
+        },
+        # The sandbox runtime has its own number: it only moves when the rootfs
+        # itself changes, which is a different release from a shell change.
+        "terminal": {
+            "version": current["terminal"],
+            "full": current["core"],
         },
         "hot": {
             "version": hot,
@@ -62,7 +72,7 @@ def main() -> None:
     }
     out = root / "update.json"
     out.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"wrote {out}: app {version} ({manifest['app']['versionCode']}), hot {hot or '(none)'}")
+    print(f"wrote {out}: app {app} ({current['code']}), terminal t{current['terminal']}, hot {hot or '（无）'}")
 
 
 if __name__ == "__main__":

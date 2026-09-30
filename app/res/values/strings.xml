@@ -2,4 +2,27 @@
 <resources>
     <!-- Launcher label only. Nothing in the UI draws an app title bar, by design. -->
     <string name="app_name">DSH</string>
+
+    <!-- 无障碍服务：系统「设置 → 无障碍」里显示的名字与说明 -->
+    <string name="a11y_label">DSH 手机助手</string>
+    <string name="a11y_description">让助手读取屏幕内容、点击、输入和滑动。开启后，您可以在对话里让 DSH 直接操作这台手机。</string>
+
+    <!-- 悬浮球 -->
+    <string name="ball_channel">悬浮球</string>
+    <string name="ball_channel_hint">常驻的语音/输入入口，随时可以关掉。</string>
+    <string name="ball_running">悬浮球已开启</string>
+    <string name="ball_running_hint">点一下说话，长按打字。点这里回到 DSH。</string>
+    <string name="ball_prompt">说点什么，或者直接打字</string>
+    <string name="ball_listening">正在听…</string>
+    <string name="ball_review">识别完成，确认后发送</string>
+    <string name="ball_heard_nothing">没听清，再说一次</string>
+    <string name="ball_voice_failed">语音识别失败</string>
+    <string name="ball_no_voice">这台设备没有可用的语音识别</string>
+    <string name="ball_no_mic">需要麦克风权限：设置 → 安卓沙箱 → 悬浮球</string>
+    <string name="ball_input_hint">例如：把我刚才那条消息发到微信里</string>
+    <string name="ball_speak">说话</string>
+    <string name="ball_send">发送</string>
+    <string name="ball_close">收起</string>
+    <string name="ball_empty">还没输入内容</string>
+    <string name="ball_sent">已交给 DSH</string>
 </resources>

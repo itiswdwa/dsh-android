@@ -136,6 +136,17 @@ public final class App extends Application {
         return BuildInfo.APP_VERSION_CODE;
     }
 
+    /**
+     * Version of the sandbox runtime (rootfs, node, dsh, installed tools).
+     *
+     * Deliberately its own number: it only moves when the runtime itself changes,
+     * so "1.1.6-t2" says the shell moved and the runtime did not. Anything that
+     * shows a version shows this one next to the shell's.
+     */
+    public static String terminalVersion() {
+        return BuildInfo.ROOTFS_VERSION;
+    }
+
     /** Distro the app boots; the bundled Ubuntu unless the user picked another. */
     public String activeDistroId() {
         return prefs.getString("distro", BUNDLED_ID);

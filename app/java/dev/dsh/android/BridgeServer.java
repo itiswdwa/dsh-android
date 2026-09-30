@@ -51,6 +51,14 @@ public final class BridgeServer {
         void onOpenInBrowser();
 
         void onShizukuPermissionRequested();
+
+        /**
+         * One of the grants the phone-assistant feature needs (see
+         * {@link Assist#PERMISSION_ACCESSIBILITY} and friends). The activity owns
+         * the system settings pages and the runtime-permission dialogs; the
+         * bridge only names what is missing.
+         */
+        void onAssistPermission(int which);
     }
 
     private static ServerSocket server;
@@ -174,6 +182,26 @@ public final class BridgeServer {
             path = path.substring(0, q);
         }
 
+        try {
+            handle(path, request, out, host);
+        } catch (Throwable error) {
+            // Assist throws IllegalStateException for every "the user has not
+            // enabled this yet" case; the message is already written for them.
+            try {
+                respondJson(out, 200, error(String.valueOf(error.getMessage())));
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /** Screen size, so a caller can aim a swipe without guessing the panel size. */
+    private static String screenSize() {
+        android.util.DisplayMetrics metrics = App.i().getResources().getDisplayMetrics();
+        return metrics.widthPixels + "x" + metrics.heightPixels;
+    }
+
+    private static void handle(String path, JSONObject request, OutputStream out, Host host)
+            throws Exception {
         switch (path) {
             case "/snapshot":
                 respondJson(out, 200, snapshot());
@@ -329,6 +357,77 @@ public final class BridgeServer {
                 App.i().clearServerLog();
                 respondJson(out, 200, ok("日志已清空"));
                 return;
+            // ---------------------------------------------------------- 手机助手
+            // The screen-control surface. Every one of these is a no-op with an
+            // explanatory error until the user has switched the accessibility
+            // service on, which is what `/a11y/request` is for.
+            case "/a11y/status": {
+                JSONObject answer = new JSONObject();
+                answer.put("ok", true);
+                answer.put("service", Assist.available());
+                answer.put("overlay", Assist.canOverlay(App.i()));
+                answer.put("microphone", App.i().checkSelfPermission(
+                        android.Manifest.permission.RECORD_AUDIO)
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED);
+                answer.put("ball", BallService.isRunning());
+                answer.put("screen", screenSize());
+                respondJson(out, 200, answer);
+                return;
+            }
+            case "/a11y/request":
+                if (host != null) host.onAssistPermission(Assist.PERMISSION_ACCESSIBILITY);
+                respondJson(out, 200, ok("请在「已下载的服务」里开启 DSH 手机助手"));
+                return;
+            case "/overlay/request":
+                if (host != null) host.onAssistPermission(Assist.PERMISSION_OVERLAY);
+                respondJson(out, 200, ok("请允许 DSH 显示在其他应用上层"));
+                return;
+            case "/mic/request":
+                if (host != null) host.onAssistPermission(Assist.PERMISSION_MICROPHONE);
+                respondJson(out, 200, ok("请允许 DSH 录音"));
+                return;
+            case "/ball/start":
+                BallService.start(App.i());
+                respondJson(out, 200, ok(BallService.isRunning() ? "悬浮球已开启" : "需要「显示在其他应用上层」权限"));
+                return;
+            case "/ball/stop":
+                BallService.stop(App.i());
+                respondJson(out, 200, ok("悬浮球已关闭"));
+                return;
+            case "/a11y/tree": {
+                JSONObject answer = new JSONObject(Assist.describe(request.optBoolean("text", false)));
+                answer.put("ok", answer.optBoolean("ok", false));
+                respondJson(out, 200, answer);
+                return;
+            }
+            case "/a11y/tap":
+                Assist.tap((float) request.optDouble("x", -1), (float) request.optDouble("y", -1));
+                respondJson(out, 200, ok("已点击"));
+                return;
+            case "/a11y/swipe":
+                Assist.swipe((float) request.optDouble("x1", -1), (float) request.optDouble("y1", -1),
+                        (float) request.optDouble("x2", -1), (float) request.optDouble("y2", -1),
+                        request.optLong("ms", 300));
+                respondJson(out, 200, ok("已滑动"));
+                return;
+            case "/a11y/key":
+                Assist.key(request.optString("name", ""));
+                respondJson(out, 200, ok("已发送 " + request.optString("name", "")));
+                return;
+            case "/a11y/type":
+                Assist.type(request.optString("text", ""));
+                respondJson(out, 200, ok("已输入"));
+                return;
+            case "/a11y/click": {
+                String label = request.optString("label", "");
+                respondJson(out, 200, ok(Assist.click(label)));
+                return;
+            }
+            case "/a11y/open": {
+                String app = request.optString("app", "");
+                respondJson(out, 200, ok(Assist.launch(app, App.i())));
+                return;
+            }
             case "/shizuku/request":
                 if (host != null) host.onShizukuPermissionRequested();
                 respondJson(out, 200, ok("已请求授权，请在手机上确认"));
@@ -401,6 +500,7 @@ public final class BridgeServer {
 
             root.put("appVersion", App.appVersion());
             root.put("appVersionCode", App.appVersionCode());
+            root.put("terminalVersion", App.terminalVersion());
             root.put("hotVersion", Payload.hotVersion());
             root.put("packagedHotVersion", Payload.packagedHotVersion());
 

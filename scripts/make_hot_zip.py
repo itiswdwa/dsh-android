@@ -15,9 +15,9 @@ full payload. The file is deliberately small enough to keep in the APK verbatim.
 
 Usage: make_hot_zip.py <repo-root> <out.zip> [--base]
 
-The version a user sees is `<app>-sp<n>` (app version from VERSION, n from the
-committed HOT tracker), or plain `<app>` when the package is the base an app
-build bakes in — `--base` selects that branch for a new app version.
+The version a user sees is `<app>-t<terminal>-sp<n>` (see scripts/version.py),
+with sp0 meaning "this line has no hot update yet" — which is what an app build
+bakes in, selected with `--base`.
 """
 from __future__ import annotations
 
@@ -29,6 +29,9 @@ import sys
 import time
 import zipfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import version  # noqa: E402  (sibling script, the one definition of the version model)
 
 # Prefixes an external package may write to. Anything else is refused: a hot
 # package is executable content, and "it came from the user" is not the same as
@@ -82,39 +85,40 @@ def read_tracker(root: Path) -> dict:
         return {}
 
 
-def next_sp(root: Path, app: str, digest: str, base: bool) -> int:
+def next_sp(root: Path, app: str, terminal: str, digest: str, base: bool) -> int:
     """The sequence number for the package about to be written.
 
-    The version a user reads is `<app>-sp<n>`, so the number has to be stable for
-    identical content (a rebuild must not bump it and re-prompt every device) and
-    monotonic for changed content (a lower number would look like a downgrade and
-    the app's "already applied" check would skip the update).
+    The version a user reads is `<app>-t<terminal>-sp<n>`, so the number has to
+    be stable for identical content (a rebuild must not bump it and re-prompt
+    every device) and monotonic for changed content (a lower number would look
+    like a downgrade and the app's "already applied" check would skip the
+    update).
 
-      same app, same payload   -> keep the number it already has
-      same app, new payload    -> the next number
-      new app version          -> 1 for a hot package, 0 for the base an app
-                                  build bakes in (which is published as plain
-                                  `<app>`, because it has no hot update yet)
+      same line, same payload  -> keep the number it already has
+      same line, new payload   -> the next number
+      new line                 -> 1 for a hot package, 0 for the base an app
+                                  build bakes in. A new line means a new app
+                                  version *or* a new terminal version: a hot
+                                  package is only ever applied on top of the
+                                  exact runtime it was built for.
     """
     tracker = read_tracker(root)
-    if tracker.get("app") == app and tracker.get("hash") == digest:
+    same_line = tracker.get("app") == app and str(tracker.get("terminal", "")) == terminal
+    if same_line and tracker.get("hash") == digest:
         return int(tracker.get("sp", 0))
-    if tracker.get("app") != app:
+    if not same_line:
         return 0 if base else 1
     return int(tracker.get("sp", 0)) + 1
 
 
-def write_tracker(root: Path, app: str, sp: int, digest: str) -> None:
+def write_tracker(root: Path, app: str, terminal: str, sp: int, digest: str) -> None:
     (root / TRACKER).write_text(json.dumps({
         "app": app,
+        "terminal": terminal,
         "sp": sp,
-        "version": hot_version(app, sp),
+        "version": version.hot_version(app, terminal, sp),
         "hash": digest,
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def hot_version(app: str, sp: int) -> str:
-    return app if sp <= 0 else f"{app}-sp{sp}"
 
 
 def main() -> None:
@@ -125,7 +129,8 @@ def main() -> None:
     root = Path(args[0]).resolve()
     out = Path(args[1]).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
-    app = (root / "VERSION").read_text(encoding="utf-8").strip()
+    current = version.read(root)
+    app, terminal = current["app"], current["terminal"]
 
     # The guest-side link()/chown() shim is a built artefact that must never be
     # stale or absent: without it apt/dpkg fail inside the sandbox. Build it
@@ -161,15 +166,15 @@ def main() -> None:
             digest.update(name.encode("utf-8"))
             digest.update(archive.read(name))
     content = digest.hexdigest()[:16]
-    sp = next_sp(root, app, content, base)
-    version = hot_version(app, sp)
+    sp = next_sp(root, app, terminal, content, base)
+    hot = version.hot_version(app, terminal, sp)
     with zipfile.ZipFile(out, "a", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(zipfile.ZipInfo("hot.json", date_time=time.localtime()[:6]),
-                         json.dumps({"version": version, "app": app, "sp": sp, "hash": content,
-                                     "files": written,
+                         json.dumps({"version": hot, "app": app, "terminal": terminal, "sp": sp,
+                                     "hash": content, "files": written,
                                      "built": time.strftime("%Y-%m-%dT%H:%M:%S")}, indent=2))
-    write_tracker(root, app, sp, content)
-    print(f"wrote {out} ({out.stat().st_size} bytes, {written} files, version {version}, content {content})")
+    write_tracker(root, app, terminal, sp, content)
+    print(f"wrote {out} ({out.stat().st_size} bytes, {written} files, version {hot}, content {content})")
 
 
 if __name__ == "__main__":

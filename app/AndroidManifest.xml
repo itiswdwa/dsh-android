@@ -34,6 +34,10 @@
          agent can actually see the user's files. -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <!-- 手机助手：悬浮球要画在别的应用上面 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 悬浮球点一下就是语音输入 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:name="dev.dsh.android.App"
@@ -60,6 +64,27 @@
 
         <service
             android:name="dev.dsh.android.DshService"
+            android:exported="false"
+            android:stopWithTask="false" />
+
+        <!-- 手机助手：读屏、点击、输入。用户在系统「设置 → 无障碍」里开关，
+             所以这个服务必须对系统可见，但只允许系统绑定。 -->
+        <service
+            android:name="dev.dsh.android.Assist"
+            android:exported="true"
+            android:label="@string/a11y_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service" />
+        </service>
+
+        <!-- 悬浮球：常驻的语音/输入入口。 -->
+        <service
+            android:name="dev.dsh.android.BallService"
             android:exported="false"
             android:stopWithTask="false" />
 

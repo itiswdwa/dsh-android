@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  What the assistant's accessibility service is allowed to do.
+
+  canRetrieveWindowContent + flagRetrieveInteractiveWindows: read the screen,
+  which is what turns "tap the button labelled 发送" into a real click instead of
+  guessed coordinates.
+  canPerformGestures: taps and swipes.
+  flagReportViewIds: node ids survive into the tree the agent reads, so a control
+  can be addressed the same way twice in a row.
+  No eventTypes are declared on purpose: the service is asked for the screen when
+  something needs it, and an event stream would only cost battery.
+
+  typeWindowStateChanged is still requested by the framework for the small
+  bookkeeping Android does around a service's lifetime; the service ignores the
+  events it receives.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/a11y_description"
+    android:notificationTimeout="100"
+    android:summary="@string/a11y_description" />

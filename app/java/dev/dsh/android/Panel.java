@@ -51,6 +51,17 @@ public final class Panel {
         void onSaveSettings();
 
         void onClose();
+
+        /**
+         * One of the grants the phone-assistant feature needs. The activity owns
+         * the dialogs and the settings pages; the bridge only names what is
+         * missing (`/a11y/request`, `/overlay/request`, `/mic/request`).
+         *
+         * @param which one of {@link Assist#PERMISSION_ACCESSIBILITY},
+         *              {@link Assist#PERMISSION_OVERLAY},
+         *              {@link Assist#PERMISSION_MICROPHONE}
+         */
+        void onAssistPermission(int which);
     }
 
     // Resolved from resources, so values-night/ decides light vs dark. The app

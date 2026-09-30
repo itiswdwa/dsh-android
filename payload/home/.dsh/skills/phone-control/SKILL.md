@@ -89,3 +89,34 @@ shiz --status          # installed=true granted=true version=13
 - 没有 root，`su` 不存在。
 - Shizuku 必须活着：用户重启手机或强停它之后，命令会失败，直到他们重新授权。
 - `dumpsys` 输出很大，**永远 grep**，别整段读回来。
+
+## 第二条通道：`ui`（无障碍，不需要 Shizuku，看得见界面）
+
+`shiz` 快、能装 APK、能改系统设置，但它**看不见界面**：它只会按坐标点，而坐标要靠猜。
+`ui` 走应用的无障碍服务，读得到屏幕上的控件文字，所以"点那个叫发送的按钮"可以直接说。
+
+```sh
+ui status                # 无障碍开没开、悬浮球在不在、屏幕尺寸
+ui tree                  # 当前屏幕的可点/可输入控件（含坐标、控件 id、能做什么）
+ui click "发送"           # 按文字点，比坐标稳
+ui tap 540 1200          # 按坐标点（坐标从 ui tree 里取）
+ui type "晚饭吃啥"        # 往当前输入框输入（不经过输入法，中文安全）
+ui key back              # back / home / recents / notifications / lock
+ui swipe 540 1800 540 600 300
+ui open "微信"            # 按应用名或包名启动
+```
+
+用它的顺序建议：
+
+1. `ui tree` 看一眼，别凭猜测坐标；
+2. 有文字就用 `ui click "文字"`；
+3. 只有图标没有文字时（比如返回箭头、垃圾桶），用 `ui tree` 给出的坐标 `ui tap`；
+4. 点完再 `ui tree` 确认结果 —— 界面变了才说明点对了。
+
+**没开启时**：`ui status` 会显示 `无障碍服务：未开启`。这是用户手动开的开关（系统设置里），
+你需要让用户去 **DSH 应用 → 设置 → 安卓沙箱 → 手机助手 → 开启**，或者让应用弹出授权页：
+`ui permission a11y`（同理 `ui permission overlay` 是悬浮窗、`ui permission mic` 是麦克风）。
+不要假装能自己拿到这个权限。
+
+**两条通道怎么选**：装 APK、`pm`、`settings`、截屏、读通知 → `shiz`；点界面上按钮、读界面文字、
+在别的应用里打字 → `ui`。两边都没有时再考虑 `am start`（`shiz`）。

@@ -30,7 +30,7 @@ sh "$ROOT/scripts/build_linkfix.sh"
 
 echo "== overlay / =="
 cp -a "$ROOT/payload/." "$ROOTFS/"
-chmod +x "$ROOTFS/opt/dsh/android/start-dsh.sh" "$ROOTFS/usr/local/bin/shiz"
+chmod +x "$ROOTFS/opt/dsh/android/start-dsh.sh" "$ROOTFS/usr/local/bin/shiz" "$ROOTFS/usr/local/bin/ui"
 chmod 755 "$ROOTFS/opt/dsh/android"
 
 echo "== guest home (skills, instructions) =="

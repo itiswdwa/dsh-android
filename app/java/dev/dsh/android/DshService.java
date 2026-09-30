@@ -164,14 +164,34 @@ public final class DshService extends Service implements ServerBus.Listener {
             piFlags |= PendingIntent.FLAG_IMMUTABLE;
         }
         PendingIntent pending = PendingIntent.getActivity(this, 0, open, piFlags);
+
+        // 停止/启动：通知栏里直接能做的两件事。以前只有一条常驻通知，想停服务得
+        // 先回应用、再开面板、再点一次 —— 通知本来就该承担它自己那一步。
+        Intent stop = new Intent(this, DshService.class).setAction(ACTION_STOP);
+        Intent start = new Intent(this, DshService.class).setAction(ACTION_ENSURE);
+        PendingIntent stopIntent = PendingIntent.getService(this, 2, stop, piFlags);
+        PendingIntent startIntent = PendingIntent.getService(this, 3, start, piFlags);
+
+        boolean running = ServerBus.state() == ServerBus.State.RUNNING;
+        Notification.Action toggle = new Notification.Action.Builder(
+                android.graphics.drawable.Icon.createWithResource(this,
+                        running ? android.R.drawable.ic_menu_close_clear_cancel : android.R.drawable.ic_media_play),
+                running ? "停止" : "启动",
+                running ? stopIntent : startIntent).build();
+
         Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(this, CHANNEL)
                 : new Notification.Builder(this);
         return builder
                 .setContentTitle("DeepSeek Harness")
                 .setContentText(text)
-                .setSmallIcon(android.R.drawable.stat_notify_sync)
-                .setOngoing(true)
+                // The product mark rather than a generic sync glyph: the status
+                // bar is the one place this app is visible all day.
+                .setSmallIcon(R.drawable.ic_whale_monochrome)
+                .setOngoing(running || ServerBus.state() == ServerBus.State.STARTING)
+                .setOnlyAlertOnce(true)
+                .setShowWhen(false)
+                .addAction(toggle)
                 .setContentIntent(pending)
                 .build();
     }
