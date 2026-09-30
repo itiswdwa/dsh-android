@@ -416,6 +416,17 @@ public final class BridgeServer {
                 if (host != null) host.onAssistPermission(Assist.PERMISSION_MICROPHONE);
                 respondJson(out, 200, ok("请允许 DSH 录音"));
                 return;
+            case "/ball/say": {
+                // Anything with something to report: the page (which tool is
+                // running), a guest script, or the agent itself.
+                String text = request.optString("text", "");
+                BallService.sayFromOutside(text);
+                JSONObject answer = new JSONObject();
+                answer.put("ok", true);
+                answer.put("shown", BallService.isRunning());
+                respondJson(out, 200, answer);
+                return;
+            }
             case "/ball/config": {
                 // Appearance only — size and picture. Everything about how it
                 // behaves is code, but this is what makes tweaks to how it looks

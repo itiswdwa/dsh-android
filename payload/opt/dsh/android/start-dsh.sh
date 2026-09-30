@@ -33,6 +33,12 @@ if [ -z "$NODE" ]; then
 fi
 echo "start-dsh: node=$NODE"
 
+# Repair an already-installed sandbox on the way up. The rootfs cannot be written
+# by a hot package, so a fix to a file inside it has to be applied from here at
+# boot; the script is idempotent and prints only when it changes something.
+# See payload/opt/dsh/android/repair-dsh.mjs for what it fixes.
+"$NODE" "$DSH_INSTALL/android/repair-dsh.mjs" "$DSH_INSTALL/node_modules" 2>&1 | sed 's/^/start-dsh: /' || true
+
 
 mkdir -p "$DSH_HOME/.dsh"
 

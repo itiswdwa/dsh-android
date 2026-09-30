@@ -67,6 +67,9 @@ public final class BallService extends Service {
     private static final String CHANNEL = "assistant";
     private static final int NOTIFICATION_ID = 4210;
 
+    /** Whether the user wants the ball up; survives app updates and reboots. */
+    static final String PREF_ENABLED = "ballEnabled";
+
     /** Appearance, set from the settings page through `/ball/config`. */
     static final String PREF_SIZE = "ballSizeDp";
     static final String PREF_IMAGE = "ballImagePath";
@@ -99,13 +102,30 @@ public final class BallService extends Service {
         return running;
     }
 
+    /** Start the overlay and remember that the user wants it (see {@link #restore}). */
     public static void start(Context ctx) {
+        App.i().prefs.edit().putBoolean(PREF_ENABLED, true).apply();
         if (!Assist.canOverlay(ctx) || running) return;
         ctx.startForegroundService(new Intent(ctx, BallService.class));
     }
 
+    /** Stop the overlay and remember that the user does not want it. */
     public static void stop(Context ctx) {
+        App.i().prefs.edit().putBoolean(PREF_ENABLED, false).apply();
         ctx.stopService(new Intent(ctx, BallService.class));
+    }
+
+    /**
+     * Bring the ball back after the process was replaced.
+     *
+     * An app update kills the service, and without this the ball silently
+     * disappeared until the user went digging in the settings again — the ball is
+     * a thing the user turned on, so it should stay on.
+     */
+    public static void restore(Context ctx) {
+        if (!App.i().prefs.getBoolean(PREF_ENABLED, false)) return;
+        if (!Assist.canOverlay(ctx) || running) return;
+        ctx.startForegroundService(new Intent(ctx, BallService.class));
     }
 
     /** Re-read the appearance settings by restarting the overlay. */
@@ -486,7 +506,7 @@ public final class BallService extends Service {
             return;
         }
         hidePanel();
-        say(getString(R.string.ball_sending), 0);
+        say(getString(R.string.ball_you) + value, 0);
         Assist.deliver(value);
     }
 
@@ -497,6 +517,21 @@ public final class BallService extends Service {
      * composer on screen, the text went nowhere and the ball still said it was
      * delivered. The status comes from the page itself now.
      */
+    /**
+     * A line from outside — the page, or the agent's own tools — shown in the
+     * bubble.
+     *
+     * This is how the ball reports what the assistant is *doing*: the page knows
+     * which tool is running, and the guest scripts know what they were asked to
+     * do. The ball only has to show it.
+     */
+    static void sayFromOutside(String text) {
+        BallService service = live;
+        if (service == null || text == null || text.trim().isEmpty()) return;
+        String line = text.trim();
+        service.handler.post(() -> service.say(line.length() > 60 ? line.substring(0, 60) + "…" : line, 6000));
+    }
+
     static void onDeliveryResult(String status) {
         BallService service = live;
         if (service == null) return;
@@ -582,7 +617,7 @@ public final class BallService extends Service {
             }
             // Push-to-talk sends on release: that is the whole gesture. The
             // bubble keeps the text on screen so a mis-hearing is visible.
-            say(getString(R.string.ball_sending), 0);
+            say(getString(R.string.ball_you) + text.trim(), 0);
             Assist.deliver(text.trim());
         }
 
@@ -590,7 +625,7 @@ public final class BallService extends Service {
         public void onError(int code) {
             listening = false;
             if (heard != null && !heard.trim().isEmpty()) {
-                say(getString(R.string.ball_sending), 0);
+                say(getString(R.string.ball_you) + heard.trim(), 0);
                 Assist.deliver(heard.trim());
                 return;
             }

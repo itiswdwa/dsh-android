@@ -55,7 +55,7 @@ const LINK_UNSUPPORTED_CODES = /* @__PURE__ */ new Set([
 
 async function linkOrCopy(source, target) {
 \ttry {
-\t\tawait link(source, target);
+\t\tawait LINKFIX_REAL_LINK(source, target);
 \t} catch (error) {
 \t\tif (!LINK_UNSUPPORTED_CODES.has(error?.code)) throw error;
 \t\tawait copyFile(source, target, 1);
@@ -108,9 +108,37 @@ def inject_helper(source: str, anchor: str, cjs: bool) -> str:
     if cjs:
         helper = helper.replace("= /* @__PURE__ */ new Set([", "= new Set([")
         helper = helper.replace("await copyFile(", "await node_fs_promises.copyFile(")
-        helper = helper.replace("await link(source, target);", "await node_fs_promises.link(source, target);")
+        helper = helper.replace("await LINKFIX_REAL_LINK(source, target);",
+                                "await node_fs_promises.link(source, target);")
     index = source.index(anchor)
     return source[:index] + helper + source[index:]
+
+
+def repair(source: str, cjs: bool) -> str:
+    """Undo the self-recursion an earlier version of this script could produce.
+
+    The injected helper used to contain the very text one of the call-site swaps
+    looks for (`await link(source, target);`), so the helper ended up calling
+    itself: every publish path threw a stack overflow instead of linking, and
+    dsh reported "Unable to persist attachment". Sandboxes built with that
+    version carry the broken file, and re-patching alone cannot fix them (the
+    helper marker is already there), so the repair runs on every invocation.
+    """
+    if HELPER_MARKER not in source:
+        return source
+    start = source.find("async function linkOrCopy(source, target) {")
+    if start < 0:
+        return source
+    end = source.find("\n}", start)
+    body = source[start:end]
+    if "await linkOrCopy(source, target);" not in body:
+        return source
+    # The ESM path keeps the placeholder: the call-site swaps below look for the
+    # exact text `await link(source, target);`, and leaving the real call in place
+    # here is how the helper started calling itself in the first place.
+    replacement = ("await node_fs_promises.link(source, target);"
+                   if cjs else "await LINKFIX_REAL_LINK(source, target);")
+    return source[:start] + body.replace("await linkOrCopy(source, target);", replacement) + source[end:]
 
 
 def patch(root: Path, relative: str, imports, anchor: str, calls) -> str:
@@ -118,6 +146,10 @@ def patch(root: Path, relative: str, imports, anchor: str, calls) -> str:
     if not path.is_file():
         return f"skip {relative}: missing"
     source = path.read_text(encoding="utf-8")
+    # Always run the repair: a sandbox built by the buggy revision of this script
+    # has the marker already (so inject_helper would skip) and the recursion in
+    # place. Idempotent when there is nothing to fix.
+    source = repair(source, cjs=relative.endswith(".cjs"))
     if isinstance(imports, tuple):
         original, patched = imports
         if patched not in source:
@@ -131,6 +163,14 @@ def patch(root: Path, relative: str, imports, anchor: str, calls) -> str:
         if old not in source:
             return f"skip {relative}: call site missing: {old[:50]!r}"
         source = source.replace(old, new, 1)
+    # The helper's own call was held back behind a placeholder so the swaps above
+    # could not rewrite it into a call to itself; put the real one back.
+    if relative.endswith(".cjs"):
+        source = source.replace("await LINKFIX_REAL_LINK(source, target);",
+                                "await node_fs_promises.link(source, target);")
+    else:
+        source = source.replace("await LINKFIX_REAL_LINK(source, target);",
+                                "await link(source, target);")
     path.write_text(source, encoding="utf-8")
     return f"patched {relative} ({len(calls)} call sites)"
 

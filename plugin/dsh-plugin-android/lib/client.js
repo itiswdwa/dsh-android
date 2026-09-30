@@ -1188,6 +1188,60 @@ window.__ModuleLoader__.load({
 			}
 		}
 
+		/**
+		 * Tell the floating ball what the session is doing.
+		 *
+		 * The page is the only place that knows which tool is running, and the
+		 * ball is the only thing the user sees while they are in another app, so
+		 * the two are wired together here: new rows in the conversation are
+		 * reported to `/ball/say`, throttled and de-duplicated so the bubble reads
+		 * like a status line rather than a log.
+		 *
+		 * Deliberately class-name agnostic: the shell's CSS modules are hashed, so
+		 * this watches for *text* appearing and filters the small set of things
+		 * that are not progress (the composer, our own panels, buttons).
+		 */
+		function installBallStatus() {
+			let last = "";
+			let lastAt = 0;
+			let pending = null;
+			const IGNORE = /^(发送|收起|停止|新建会话|设置|插件|终端)$/;
+			const send = (text) => {
+				const line = text.trim().replace(/\s+/g, " ");
+				if (line.length < 2 || line.length > 48 || IGNORE.test(line)) return;
+				if (line === last) return;
+				const now = Date.now();
+				if (now - lastAt < 1200) {
+					// Keep only the newest of a burst; a tool row is added together
+					// with its spinner and duration, and only the last one matters.
+					pending = line;
+					return;
+				}
+				last = line;
+				lastAt = now;
+				call("/ball/say", { text: line + "…" }).catch(() => {});
+			};
+			setInterval(() => {
+				if (pending === null) return;
+				const line = pending;
+				pending = null;
+				send(line);
+			}, 1200);
+
+			const observer = new MutationObserver((records) => {
+				for (const record of records) {
+					for (const node of record.addedNodes) {
+						if (node.nodeType !== 1) continue;
+						if (node.closest !== undefined && node.closest("form, [role=textbox], [data-dsa]") !== null) continue;
+						const text = (node.innerText ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
+						if (text.length > 0) send(text[text.length - 1]);
+					}
+				}
+			});
+			observer.observe(document.body, { childList: true, subtree: true });
+			return observer;
+		}
+
 		function AndroidSection(props) {
 			const t = (key) => props.t(key);
 			const [snapshot, setSnapshot] = react.useState(null);
@@ -1712,6 +1766,12 @@ window.__ModuleLoader__.load({
 					delete window.__dshAndroidPrompt;
 				};
 			}, "dsh-plugin-android: prompt hook");
+			// Only useful while the ball is up, but harmless otherwise: the bridge
+			// answers with shown:false and nothing happens.
+			ctx.effect(() => {
+				const observer = installBallStatus();
+				return () => observer.disconnect();
+			}, "dsh-plugin-android: ball status");
 			ctx.slots.inject("settings.section", () => ctx.slots.register({
 				name: "settings.section",
 				id: "android",

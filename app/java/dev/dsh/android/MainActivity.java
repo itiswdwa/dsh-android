@@ -148,6 +148,9 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
         });
 
         requestStorageAccess();
+        // The ball is an opt-in the user made; an app update must not silently
+        // take it away.
+        BallService.restore(this);
 
         ServerBus.addListener(this);
         if (Payload.isReady()) {
