@@ -42,12 +42,15 @@ echo "   hot $VERSION (content $HASH)"
 
 # Notes are rendered from CHANGELOG.md, which is the only place a release is
 # described — a version without an entry cannot be published, so the file and
-# the release page cannot drift apart.
+# the release page cannot drift apart. The whole history of this app version is
+# rendered, not just the package being published: showing only the newest would
+# erase the previous ones from the page the moment the next one ships.
+APP_VERSION=$(cat "$ROOT/VERSION")
 if [ -n "${1:-}" ]; then
   NOTES="$1"
 else
   NOTES="$BUILD/hot-notes.md"
-  python3 "$ROOT/scripts/release_notes.py" "$VERSION" --channel hot > "$NOTES"
+  python3 "$ROOT/scripts/release_notes.py" "$APP_VERSION" --channel hot-history > "$NOTES"
 fi
 echo "   正文段落 $(wc -c < "$NOTES") 字节"
 

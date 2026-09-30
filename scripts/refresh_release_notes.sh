@@ -50,7 +50,9 @@ def render(ver, channel):
 
 body = render(version, "app")
 if hot_version:
-    body += "\n\n---\n\n<!-- hot-notes -->\n\n" + render(hot_version, "hot")
+    # The app version, not the newest package: the section lists every hot
+    # package of that line, so an earlier one stays readable after a newer ships.
+    body += "\n\n---\n\n<!-- hot-notes -->\n\n" + render(version, "hot-history")
 print(json.dumps({"body": body + "\n"}, ensure_ascii=False))
 PY
   ID=$(curl -sS -H "$AUTH" -H "$ACCEPT" "$API/releases/tags/v$version" \

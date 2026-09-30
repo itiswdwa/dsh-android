@@ -87,7 +87,8 @@ sh scripts/sync_repo.sh "这次改了什么"
 
 也就是说：**只改 `plugin/` 或 `payload/` 时不要碰 `VERSION`，也不要重新出 APK**。
 `release_hot.sh` 会把新热包挂到*当前*那版 release 上（APK 资产原地不动），重新生成
-`update.json` 的 `hot` 段，把正文段落附到 release 的 `<!-- hot-notes -->` 之后，最后推送清单
+`update.json` 的 `hot` 段，把 release 的 `<!-- hot-notes -->` 段落重渲染（**该应用版本下所有热包的条目，
+倒序** —— 只显示最新一包，等于下一包一发出来就把上一包的说明从页面上抹掉），最后推送清单
 —— 顺序是先上资产再推清单，所以应用永远不会读到一个指向不存在文件的清单。
 
 应用更新才需要抬 `VERSION`；`release.sh` 可重入，中途断掉再跑一次即可补齐资产。

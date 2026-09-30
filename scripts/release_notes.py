@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render one release's notes from CHANGELOG.md.
+"""Render release notes from CHANGELOG.md.
 
 The changelog is the single place a release is described — the GitHub release
 body is generated from it, so the two can never disagree. This is the tool the
@@ -7,17 +7,25 @@ release scripts call, and it refuses to render a version the changelog does not
 have: publishing without an entry is exactly how a release ends up described
 only by its commit log.
 
+Three renderings, because a release page has to answer three different questions:
+
+  app          what changed in this app version (the release's own notes)
+  hot          what one hot package changed
+  hot-history  every hot package published under one app version, newest first —
+               a page that shows only the newest would erase the previous ones
+               the moment the next one ships
+
 Writing rules, for whoever edits CHANGELOG.md next (Keep a Changelog + Common
 Changelog, which this project follows):
 
-  * one line per change, phrased as the impact on someone using the app, not as
-    a step in the source history;
-  * group by Added / Changed / Fixed / Removed / Security, and drop the noise —
-    build scripts, refactors and dotfiles are not release notes;
-  * the same text serves the file and the release page; nothing release-specific
-    is written anywhere else.
+  * group by Added / Changed / Fixed / Removed / Security, newest version first;
+  * one bullet per change, phrased as the impact on someone using the app — say
+    what was broken and what it does now, not which function was edited;
+  * drop the noise: build scripts, refactors and dotfiles are not release notes;
+  * never write the same change in two places: the file and the release page are
+    the same text.
 
-Usage: release_notes.py <version> [--channel app|hot] [--root DIR]
+Usage: release_notes.py <version> [--channel app|hot|hot-history] [--root DIR]
 """
 from __future__ import annotations
 
@@ -38,46 +46,93 @@ DEFINITION = re.compile(r"^\[([^\]]+)\]:\s*(\S+)\s*$")
 REFERENCE = re.compile(r"\[([^\]]+)\]")
 
 
-def read_entry(changelog: Path, version: str) -> tuple[str, str]:
-    """The notice/groups body of one version, and the date from its heading.
+class Changelog:
+    """Every entry in CHANGELOG.md, in file order (newest first)."""
 
-    Reference definitions live once at the bottom of the file, but a link only
-    resolves inside the document that carries its definition — so the ones the
-    entry actually uses are appended to the rendered body.
-    """
-    lines = changelog.read_text(encoding="utf-8").splitlines()
-    definitions = {m.group(1): m.group(2) for m in (DEFINITION.match(line) for line in lines) if m}
-    body: list[str] = []
-    date = ""
-    inside = False
-    for line in lines:
-        heading = HEADING.match(line)
-        if heading is not None:
-            if inside:
-                break
-            if heading.group(1).strip() == version:
-                inside = True
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        lines = path.read_text(encoding="utf-8").splitlines()
+        self.definitions = {
+            m.group(1): m.group(2) for m in (DEFINITION.match(line) for line in lines) if m
+        }
+        self.entries: list[tuple[str, str, str]] = []
+        version = date = ""
+        body: list[str] = []
+        for line in lines:
+            heading = HEADING.match(line)
+            if heading is not None:
+                if version:
+                    self.entries.append((version, date, self._finish(body)))
+                version = heading.group(1).strip()
                 date = (heading.group(2) or "").strip()
-            continue
-        if inside and DEFINITION.match(line) is None:
-            body.append(line)
-    if not inside:
-        available = "、".join(
-            m.group(1).strip() for m in (HEADING.match(line) for line in lines) if m is not None
-        )
-        sys.exit(f"CHANGELOG.md 里没有 {version} 的条目（现有：{available}）\n"
+                body = []
+                continue
+            if version and DEFINITION.match(line) is None:
+                body.append(line)
+        if version:
+            self.entries.append((version, date, self._finish(body)))
+
+    def _finish(self, body: list[str]) -> str:
+        """Trim the body and inline the reference definitions it uses.
+
+        Definitions live once at the bottom of the file, but a link only resolves
+        inside the document that carries it — a release page is its own document.
+        """
+        text = "\n".join(body).strip()
+        used = [name for name in dict.fromkeys(REFERENCE.findall(text)) if name in self.definitions]
+        if used:
+            text += "\n\n" + "\n".join(f"[{name}]: {self.definitions[name]}" for name in used)
+        return text
+
+    def versions(self) -> list[str]:
+        return [version for version, _date, _body in self.entries]
+
+    def entry(self, version: str) -> tuple[str, str]:
+        for found, date, body in self.entries:
+            if found == version:
+                return body, date
+        sys.exit(f"CHANGELOG.md 里没有 {version} 的条目（现有：{'、'.join(self.versions())}）\n"
                  f"先写条目再发版 —— 更新日志是唯一的事实来源。")
-    text = "\n".join(body).strip()
-    used = [name for name in dict.fromkeys(REFERENCE.findall(text)) if name in definitions]
-    if used:
-        text += "\n\n" + "\n".join(f"[{name}]: {definitions[name]}" for name in used)
-    return text, date
+
+    def hot_versions(self, app: str) -> list[str]:
+        """Hot packages of one app version, newest (highest sp) first."""
+        prefix = f"{app}-sp"
+
+        def sp(version: str) -> int:
+            return int(version.rsplit("-sp", 1)[1])
+
+        return sorted((v for v in self.versions() if v.startswith(prefix)), key=sp, reverse=True)
+
+
+def heading(version: str, date: str) -> str:
+    return f"## [{version}] - {date}" if date else f"## [{version}]"
+
+
+def render(changelog: Changelog, version: str, channel: str) -> str:
+    if channel == "app":
+        body, _date = changelog.entry(version)
+        return f"# dsh-android {version}\n\n{body}\n\n---\n\n{APP_FOOTER}".rstrip()
+
+    if channel == "hot":
+        body, date = changelog.entry(version)
+        return f"## 热更新包 {version}\n\n{body}\n\n---\n\n{HOT_FOOTER}".rstrip()
+
+    if channel == "hot-history":
+        packages = changelog.hot_versions(version)
+        if not packages:
+            return f"<!-- no hot package published for {version} yet -->"
+        sections = []
+        for package in packages:
+            body, date = changelog.entry(package)
+            sections.append(f"{heading(package, date)}\n\n{body}")
+        return "\n\n".join(sections) + f"\n\n---\n\n{HOT_FOOTER}".rstrip()
+
+    sys.exit(f"未知的 channel：{channel}（可用 app / hot / hot-history）")
 
 
 def main() -> None:
-    # Hand-rolled: the script must run before the release scripts, which are
-    # POSIX sh calling it on a phone — one less dependency, one less thing to
-    # miss when the sandbox is rebuilt.
+    # Hand-rolled: the script runs before the release scripts, which are POSIX sh
+    # on a phone — one less dependency, one less thing to miss in a fresh sandbox.
     channel, root_arg, versions = "app", None, []
     options = sys.argv[1:]
     index = 0
@@ -97,17 +152,10 @@ def main() -> None:
         versions.append(arg)
         index += 1
 
-    if len(versions) != 1 or channel not in ("app", "hot"):
+    if len(versions) != 1:
         sys.exit(__doc__)
-
     root = Path(root_arg) if root_arg is not None else Path(__file__).resolve().parent.parent
-    version = versions[0]
-    body, _date = read_entry(root / "CHANGELOG.md", version)
-    if channel == "hot":
-        title, footer = f"## 热更新包 {version}", HOT_FOOTER
-    else:
-        title, footer = f"# dsh-android {version}", APP_FOOTER
-    print(f"{title}\n\n{body}\n\n---\n\n{footer}".rstrip())
+    print(render(Changelog(root / "CHANGELOG.md"), versions[0], channel))
 
 
 if __name__ == "__main__":
