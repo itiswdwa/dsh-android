@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "app": {
-    "version": "1.1.5",
-    "versionCode": 10105,
+    "version": "1.1.4",
+    "versionCode": 10104,
     "url": "https://github.com/itiswdwa/dsh-android/releases/latest/download/dsh-android.apk",
     "page": "https://github.com/itiswdwa/dsh-android/releases/latest"
   },
