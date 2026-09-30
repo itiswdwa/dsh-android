@@ -15,7 +15,7 @@
 # plus a manifest carrying modes and symlink targets.
 set -eu
 
-ROOT=/var/minis/workspace/dsh-android
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$ROOT/build"
 ROOTFS="${DSH_ROOTFS:-$BUILD/rootfs}"
 ASSETS="$BUILD/payload-assets"

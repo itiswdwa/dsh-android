@@ -8,8 +8,9 @@
 # Usage: sync_repo.sh ["commit message"]
 set -eu
 
-SRC="${DSH_SRC_DIR:-/var/minis/workspace/dsh-android}"
-REPO="${DSH_REPO_DIR:-/var/minis/workspace/dsh-android-repo}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SRC="${DSH_SRC_DIR:-$ROOT}"
+REPO="${DSH_REPO_DIR:-$(dirname "$ROOT")/dsh-android-repo}"
 MESSAGE="${1:-更新}"
 
 [ -d "$REPO/.git" ] || { echo "no git checkout at $REPO" >&2; exit 1; }

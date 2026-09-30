@@ -1,13 +1,13 @@
 {
   "schema": 1,
   "app": {
-    "version": "1.1.4",
-    "versionCode": 10104,
+    "version": "1.1.5",
+    "versionCode": 10105,
     "url": "https://github.com/itiswdwa/dsh-android/releases/latest/download/dsh-android.apk",
     "page": "https://github.com/itiswdwa/dsh-android/releases/latest"
   },
   "hot": {
-    "version": "7ca778d0048c7bd4",
+    "version": "f54540f5ecee0bb1",
     "url": "https://github.com/itiswdwa/dsh-android/releases/latest/download/dsh-hot.zip",
     "manifest": "https://raw.githubusercontent.com/itiswdwa/dsh-android/main/update.json"
   }

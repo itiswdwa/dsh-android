@@ -106,7 +106,16 @@ window.__ModuleLoader__.load({
 			termConnected: "已连接",
 			termConnecting: "正在连接…",
 			termDisconnected: "连接已断开",
-			termUnavailable: "终端不可用：本页没有连到 DSH Android 应用的沙箱 PTY 服务（在电脑浏览器里打开时正常）。"
+			termUnavailable: "终端不可用：本页没有连到 DSH Android 应用的沙箱 PTY 服务（在电脑浏览器里打开时正常）。",
+			inUse: "当前使用",
+			builtIn: "内置",
+			saved: "已保存",
+			logEmpty: "（无输出）",
+			mountEnable: "启用",
+			mountDisable: "停用",
+			mountDisabled: "已停用",
+			portHint: "沙箱内 dsh web 监听的端口；改动在服务重启后生效。",
+			apiKeyHint: "以 DEEPSEEK_API_KEY 注入沙箱环境；留空则沿用沙箱里已有的配置。"
 		};
 		const en = {
 			nav: "Android sandbox",
@@ -191,76 +200,165 @@ window.__ModuleLoader__.load({
 			termConnected: "connected",
 			termConnecting: "connecting…",
 			termDisconnected: "disconnected",
-			termUnavailable: "Terminal unavailable: this page is not connected to the DSH Android sandbox PTY service (expected in a desktop browser)."
+			termUnavailable: "Terminal unavailable: this page is not connected to the DSH Android sandbox PTY service (expected in a desktop browser).",
+			inUse: "in use",
+			builtIn: "bundled",
+			saved: "Saved",
+			logEmpty: "(no output)",
+			mountEnable: "Enable",
+			mountDisable: "Disable",
+			mountDisabled: "disabled",
+			portHint: "Port dsh web listens on inside the sandbox; changes apply after a restart.",
+			apiKeyHint: "Injected into the sandbox as DEEPSEEK_API_KEY; leave blank to keep whatever the sandbox already has."
 		};
 
-		const S = {
-			card: {
-				background: "var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base, #fff))",
-				border: "0.5px solid var(--dsw-alias-border-l3, rgba(0,0,0,0.12))",
-				borderRadius: 10,
-				padding: "12px 14px",
-				marginBottom: 12
-			},
-			row: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
-			h: { fontSize: 13, fontWeight: 600, margin: "18px 0 8px", color: "var(--dsw-alias-label-primary, #111)" },
-			label: { fontSize: 12, color: "var(--dsw-alias-label-secondary, #666)", margin: "8px 0 4px" },
-			mono: {
-				fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-				fontSize: 11,
-				whiteSpace: "pre-wrap",
-				wordBreak: "break-all",
-				maxHeight: 220,
-				overflow: "auto",
-				background: "var(--dsw-alias-bg-base, #fafafa)",
-				borderRadius: 8,
-				padding: 10,
-				color: "var(--dsw-alias-label-secondary, #555)"
-			},
-			dot: { width: 8, height: 8, borderRadius: 4, display: "inline-block" }
-		};
+		/* ====================================================================
+		 * Page chrome
+		 * --------------------------------------------------------------------
+		 * The settings shell hands a section only `{ close }` and renders it in
+		 * the content column: every heading, row and control on this page is the
+		 * registrant's own, so "matching the shell" is a discipline the page has
+		 * to keep by itself. It keeps it three ways:
+		 *
+		 *   atoms    Button / Switch / StateDot / Tag come from
+		 *            @deepseek-ai/dsh-client-ui-primitives, so hover, active,
+		 *            focus ring, disabled state and aria roles are upstream's.
+		 *   tokens   colours are --dsw-* only — no literals — so light/dark and
+		 *            any future retheme need no code here.
+		 *   layout   the shapes the native pages use: an 18px/600 heading over a
+		 *            13px tertiary intro, flat `.dsa-field` rows split by 0.5px
+		 *            hairlines, and settings-card surfaces for grouped items.
+		 *
+		 * The primitives package is a static-table module in the shell's frozen
+		 * seed (PLATFORM_MODULES), so requiring it adds no graph edge. It is
+		 * resolved defensively anyway: a missing atom must degrade to plain
+		 * chrome, never take the plugin — and with it the whole front-end boot —
+		 * down.
+		 * ================================================================ */
 
-		function buttonStyle(kind) {
-			return {
-				font: "inherit",
-				fontSize: 13,
-				padding: "6px 12px",
-				minHeight: 34,
-				borderRadius: 8,
-				cursor: "pointer",
-				color: kind === "primary"
-					? "var(--dsw-alias-label-on-primary, #fff)"
-					: "var(--dsw-alias-label-primary, #111)",
-				background: kind === "primary"
-					? "var(--dsw-alias-state-business-primary, #4c8dff)"
-					: "var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,0.06))",
-				border: "0.5px solid var(--dsw-alias-border-l3, rgba(0,0,0,0.12))"
-			};
+		const primitives = (() => {
+			try {
+				return require("@deepseek-ai/dsh-client-ui-primitives");
+			} catch (error) {
+				return null;
+			}
+		})();
+
+		function fallbackButton(props) {
+			const rest = Object.assign({}, props);
+			delete rest.children;
+			return h("button", Object.assign({ type: "button", className: "dsa-plainButton" }, rest), props.children);
 		}
 
-		function fieldStyle() {
-			return {
-				font: "inherit",
-				fontSize: 13,
-				padding: "7px 10px",
-				minHeight: 34,
-				width: "100%",
-				boxSizing: "border-box",
-				borderRadius: 8,
-				color: "var(--dsw-alias-label-primary, #111)",
-				background: "var(--dsw-alias-bg-base, #fff)",
-				border: "0.5px solid var(--dsw-alias-border-l3, rgba(0,0,0,0.2))"
-			};
-		}
-
-		function Button(props) {
-			const style = Object.assign({}, buttonStyle(props.kind), props.disabled ? { opacity: 0.5, cursor: "default" } : null, props.style);
+		function fallbackSwitch(props) {
 			return h("button", {
 				type: "button",
-				style,
-				disabled: props.disabled === true,
-				onClick: props.onClick
-			}, props.children);
+				role: "switch",
+				"aria-checked": props.checked === true,
+				"aria-label": props.label,
+				className: "dsa-plainSwitch",
+				onClick: () => props.onChange(!props.checked)
+			}, h("span", { className: "dsa-plainThumb" }));
+		}
+
+		function fallbackStateDot(props) {
+			return h("span", { className: "dsa-plainDot", "data-state": props.state, "aria-hidden": "true" });
+		}
+
+		function fallbackTag(props) {
+			return h("span", { className: "dsa-plainTag" }, props.children);
+		}
+
+		/**
+		 * Take one atom from the shared library, or the local stand-in.
+		 *
+		 * Presence, not `typeof === "function"`: Button is a forwardRef
+		 * component, which is a React element type *object*, so a function test
+		 * silently rejects exactly the atoms that matter most.
+		 */
+		function atom(name, fallback) {
+			if (primitives === null) return fallback;
+			const found = primitives[name];
+			return found === undefined || found === null ? fallback : found;
+		}
+
+		const Button = atom("Button", fallbackButton);
+		const Switch = atom("Switch", fallbackSwitch);
+		const StateDot = atom("StateDot", fallbackStateDot);
+		const Tag = atom("Tag", fallbackTag);
+
+		const STYLE_ID = "dsh-plugin-android/page.css";
+
+		/**
+		 * The page stylesheet. Kept as one plain block (not CSS modules): this
+		 * bundle is hand-written and has no build step to hash class names, so
+		 * every rule is scoped under `.dsa-root` instead, and every value is a
+		 * --dsw-* token the theme resolves.
+		 */
+		const PAGE_CSS = `
+.dsa-root{display:flex;flex-direction:column;gap:14px;width:100%;max-width:760px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px}
+.dsa-root *{box-sizing:border-box}
+.dsa-heading{margin:0;font-size:18px;font-weight:600;line-height:26px}
+.dsa-intro{margin:0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary)}
+.dsa-meta{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere}
+.dsa-group{display:flex;flex-direction:column;gap:10px;min-width:0}
+.dsa-groupTitle{margin:0;font-size:15px;font-weight:600;line-height:22px}
+.dsa-card{border:0.5px solid var(--dsw-alias-settings-card-stroke);border-radius:var(--dsw-radius-xl);background:var(--dsw-alias-settings-card-fill);padding:12px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.dsa-list{display:flex;flex-direction:column;gap:10px;margin:0;padding:0;list-style:none}
+.dsa-row{display:flex;align-items:center;gap:10px;min-width:0}
+.dsa-rowWrap{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+.dsa-spread{display:flex;align-items:center;gap:10px;justify-content:space-between;min-width:0}
+.dsa-copy{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.dsa-inline{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+.dsa-title{font-size:14px;line-height:20px}
+.dsa-strong{font-size:14px;font-weight:500;line-height:20px}
+.dsa-desc{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
+.dsa-hint{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
+.dsa-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:17px;overflow-wrap:anywhere}
+.dsa-error{font-size:12px;line-height:18px;color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere}
+.dsa-warn{font-size:12px;line-height:18px;color:var(--dsw-alias-state-warn-primary);overflow-wrap:anywhere}
+.dsa-sep{border:0;border-top:0.5px solid var(--dsw-alias-border-l2);margin:0}
+.dsa-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dsa-foot{display:flex;align-items:center;gap:8px;padding-top:2px}
+.dsa-field{display:flex;flex-direction:column;gap:6px;padding:12px 0}
+.dsa-field:first-child{padding-top:2px}
+.dsa-field + .dsa-field,.dsa-field + .dsa-toggle,.dsa-toggle + .dsa-field,.dsa-toggle + .dsa-toggle,.dsa-foot{border-top:0.5px solid var(--dsw-alias-border-l2);padding-top:12px}
+.dsa-fieldLabel{font-size:13px;font-weight:500;line-height:20px}
+.dsa-inputRow{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}
+.dsa-inputRow > .dsa-input,.dsa-inputRow > .dsa-textarea{flex:1 1 140px;width:auto;min-width:0}
+.dsa-input,.dsa-textarea{width:100%;height:34px;padding:0 12px;border:0.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-3);font:inherit;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary);outline:none}
+.dsa-input:focus-visible,.dsa-textarea:focus-visible{border-color:var(--dsw-alias-state-business-primary)}
+.dsa-input::placeholder,.dsa-textarea::placeholder{color:var(--dsw-alias-label-dimmed)}
+.dsa-textarea{height:auto;min-height:92px;padding:8px 12px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:18px}
+.dsa-input[type=password]{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.dsa-pre{margin:0;padding:10px 12px;border:0.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);max-height:240px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:17px;color:var(--dsw-alias-label-secondary);white-space:pre-wrap;overflow-wrap:anywhere}
+.dsa-toggle{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0}
+.dsa-item{display:flex;flex-direction:column;gap:8px;min-width:0}
+.dsa-item + .dsa-item{border-top:0.5px solid var(--dsw-alias-border-l2);padding-top:10px}
+.dsa-ellipsis{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.dsa-plainButton{font:inherit;font-size:13px;padding:6px 12px;border-radius:var(--dsw-radius-md);border:0.5px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer}
+.dsa-plainSwitch{position:relative;flex:none;width:36px;height:20px;padding:2px;border:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer}
+.dsa-plainSwitch[aria-checked=true]{background:var(--dsw-alias-state-success-primary)}
+.dsa-plainThumb{display:block;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-primary-foreground);transition:transform 120ms ease}
+.dsa-plainSwitch[aria-checked=true] .dsa-plainThumb{transform:translateX(16px)}
+.dsa-plainDot{display:inline-block;width:10px;height:10px;border-radius:50%;background:currentColor}
+.dsa-plainDot[data-state=done]{color:var(--dsw-alias-state-success-primary)}
+.dsa-plainDot[data-state=warning]{color:var(--dsw-alias-state-warn-primary)}
+.dsa-plainDot[data-state=error]{color:var(--dsw-alias-state-error-primary)}
+.dsa-plainDot[data-state=idle]{color:var(--dsw-alias-state-idle-primary)}
+.dsa-plainTag{display:inline-flex;align-items:center;padding:1px 8px;border:0.5px solid var(--dsw-alias-border-l4);border-radius:999px;font-size:11px;line-height:17px;font-weight:500;color:var(--dsw-alias-label-tertiary)}
+`;
+
+		/** Mount the page stylesheet once, and take it away when the plugin goes. */
+		function mountStyles() {
+			if (typeof document === "undefined") return () => {};
+			if (document.querySelector(`style[data-plugin-css=${JSON.stringify(STYLE_ID)}]`) !== null) return () => {};
+			const tag = document.createElement("style");
+			tag.dataset.plugin = "dsh-plugin-android";
+			tag.dataset.pluginCss = STYLE_ID;
+			tag.textContent = PAGE_CSS;
+			document.head.appendChild(tag);
+			return () => tag.remove();
 		}
 
 		function usePolling(intervalMs) {
@@ -297,68 +395,117 @@ window.__ModuleLoader__.load({
 			return data;
 		}
 
+		/* ------------------------------------------------------------------
+		 * The page's own shapes. Each of these is one native pattern, kept in
+		 * one place so the whole page stays on it.
+		 * ---------------------------------------------------------------- */
+
+		function Card(props) {
+			return h("div", { className: "dsa-card" }, props.children);
+		}
+
+		function Group(props) {
+			return h("section", { className: "dsa-group" },
+				props.title === undefined || props.title === ""
+					? null
+					: h("h3", { className: "dsa-groupTitle" }, props.title),
+				props.children);
+		}
+
+		/** A labelled settings-form field: label, control, hint (fields.module.css). */
+		function Field(props) {
+			return h("div", { className: "dsa-field" },
+				h("label", { className: "dsa-fieldLabel", htmlFor: props.id }, props.label),
+				props.control,
+				props.hint === undefined ? null : h("p", { className: "dsa-hint" }, props.hint));
+		}
+
+		function TextInput(props) {
+			const rest = Object.assign({}, props);
+			delete rest.grow;
+			return h("input", Object.assign({ id: props.id, className: "dsa-input", type: props.type ?? "text" }, rest));
+		}
+
+		/** Title + description on the left, one control on the right (the General rows). */
+		function ToggleRow(props) {
+			return h("div", { className: "dsa-toggle" },
+				h("div", { className: "dsa-copy" },
+					h("span", { className: "dsa-title" }, props.title),
+					props.desc === undefined ? null : h("span", { className: "dsa-hint" }, props.desc)),
+				h(Switch, { checked: props.checked === true, onChange: props.onChange, label: props.title }));
+		}
+
 		function StatusCard(props) {
-			const status = props.status;
-			const colour = status.state === "RUNNING" ? "#3fb950"
-				: status.state === "ERROR" ? "#f85149"
-					: status.state === "STARTING" ? "#d29922" : "var(--dsw-alias-label-secondary, #888)";
-			return h("div", { style: S.card },
-				h("div", { style: S.row },
-					h("span", { style: Object.assign({}, S.dot, { background: colour }) }),
-					h("strong", { style: { fontSize: 13 } }, props.t(status.state === "RUNNING" ? "running"
-						: status.state === "STARTING" ? "starting"
-							: status.state === "ERROR" ? "failed" : "stopped")),
-					h("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary, #666)" } },
-						"127.0.0.1:" + status.port)
-				),
-				status.url !== null && status.url !== ""
-					? h("div", { style: { fontSize: 11, marginTop: 6, wordBreak: "break-all", color: "var(--dsw-alias-label-secondary, #666)" } }, status.url)
+			const status = props.status ?? {};
+			const dot = status.state === "RUNNING" ? "done"
+				: status.state === "ERROR" ? "error"
+					: status.state === "STARTING" ? "ongoing" : "idle";
+			const label = props.t(status.state === "RUNNING" ? "running"
+				: status.state === "STARTING" ? "starting"
+					: status.state === "ERROR" ? "failed" : "stopped");
+			return h(Card, null,
+				h("div", { className: "dsa-row" },
+					h(StateDot, { state: dot }),
+					h("span", { className: "dsa-strong" }, label),
+					h("span", { className: "dsa-hint" }, "127.0.0.1:" + status.port)),
+				status.url !== null && status.url !== undefined && status.url !== ""
+					? h("div", { className: "dsa-desc dsa-mono" }, status.url)
 					: null,
-				status.error !== null && status.error !== ""
-					? h("div", { style: { fontSize: 12, marginTop: 6, color: "#f85149" } }, status.error)
+				status.error !== null && status.error !== undefined && status.error !== ""
+					? h("div", { className: "dsa-error" }, status.error)
 					: null,
-				h("div", { style: Object.assign({}, S.row, { marginTop: 10 }) },
-					h(Button, { kind: "primary", onClick: () => props.act("/server/start") }, props.t("start")),
-					h(Button, { onClick: () => props.act("/server/stop") }, props.t("stop")),
-					h(Button, { onClick: () => props.act("/server/restart") }, props.t("restart")),
-					h(Button, { onClick: () => props.act("/open-in-browser") }, props.t("openBrowser")),
-					h(Button, { onClick: () => props.act("/import") }, props.t("import"))
-				),
-				props.message !== null ? h("div", { style: { fontSize: 12, marginTop: 8, color: "var(--dsw-alias-label-secondary, #666)" } }, props.message) : null
-			);
+				h("hr", { className: "dsa-sep" }),
+				h("div", { className: "dsa-actions" },
+					h(Button, { variant: "primary", onClick: () => props.act("/server/start") }, props.t("start")),
+					h(Button, { variant: "ghost", onClick: () => props.act("/server/stop") }, props.t("stop")),
+					h(Button, { variant: "ghost", onClick: () => props.act("/server/restart") }, props.t("restart")),
+					h(Button, { variant: "ghost", size: "sm", onClick: () => props.act("/open-in-browser") }, props.t("openBrowser")),
+					h(Button, { variant: "ghost", size: "sm", onClick: () => props.act("/import") }, props.t("import"))),
+				props.message !== null && props.message !== undefined
+					? h("p", { className: "dsa-hint" }, props.message)
+					: null);
 		}
 
 		function DistroCard(props) {
+			const t = props.t;
 			const [command, setCommand] = react.useState(null);
 			react.useEffect(() => {
 				setCommand(props.distro.command);
 			}, [props.distro.id, props.distro.command]);
-			return h("div", { style: Object.assign({}, S.card, { marginBottom: 8 }) },
-				h("div", { style: S.row },
-					h("strong", { style: { fontSize: 13 } }, props.distro.name),
-					props.distro.active ? h("span", { style: { fontSize: 11, color: "#3fb950" } }, "●") : null,
-					h("span", { style: { flex: 1 } }),
-					props.distro.active ? null : h(Button, { onClick: () => props.onSelect(props.distro.id) }, props.t("select")),
-					props.distro.bundled ? null : h(Button, { onClick: () => props.onDelete(props.distro.id) }, props.t("remove"))
-				),
-				h("div", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary, #666)", marginTop: 4 } },
-					props.distro.id + " · " + props.distro.path),
-				props.distro.active
-					? h("div", null,
-						h("div", { style: S.label }, props.t("command")),
-						h("textarea", {
-							value: command ?? "",
-							rows: 2,
-							style: Object.assign({}, fieldStyle(), { resize: "vertical" }),
-							onChange: (event) => setCommand(event.target.value)
-						}),
-						h(Button, {
-							style: { marginTop: 6 },
-							onClick: () => props.onCommand(props.distro.id, command ?? "")
-						}, props.t("saveCommand"))
-					)
-					: null
-			);
+			return h("li", null,
+				h(Card, null,
+					h("div", { className: "dsa-spread" },
+						h("div", { className: "dsa-inline" },
+							h("span", { className: "dsa-strong" }, props.distro.name),
+							props.distro.active ? h(Tag, { tone: "success" }, t("inUse")) : null,
+							props.distro.bundled ? h(Tag, { tone: "neutral" }, t("builtIn")) : null),
+						h("div", { className: "dsa-actions" },
+							props.distro.active ? null : h(Button, {
+								variant: "outline", size: "sm",
+								onClick: () => props.onSelect(props.distro.id)
+							}, t("select")),
+							props.distro.bundled ? null : h(Button, {
+								variant: "ghost", size: "sm",
+								onClick: () => props.onDelete(props.distro.id)
+							}, t("remove")))),
+					h("div", { className: "dsa-desc dsa-mono" }, props.distro.id + " · " + props.distro.path),
+					props.distro.active
+						? h("div", null,
+							h("hr", { className: "dsa-sep" }),
+							h("div", { className: "dsa-field" },
+								h("label", { className: "dsa-fieldLabel" }, t("command")),
+								h("textarea", {
+									className: "dsa-textarea",
+									rows: 3,
+									value: command ?? "",
+									onChange: (event) => setCommand(event.target.value)
+								}),
+								h("div", { className: "dsa-actions" },
+									h(Button, {
+										variant: "outline", size: "sm",
+										onClick: () => props.onCommand(props.distro.id, command ?? "")
+									}, t("saveCommand")))))
+						: null));
 		}
 
 		function MountsCard(props) {
@@ -377,73 +524,72 @@ window.__ModuleLoader__.load({
 					setMessage(String(error.message ?? error));
 				}
 			};
-			return h("div", { style: S.card },
+			return h(Group, { title: t("mounts") },
 				mounts.length === 0
-					? h("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary, #666)" } }, t("mountEmpty"))
-					: mounts.map((mount) => h("div", {
-						key: mount.id,
-						style: { borderBottom: "0.5px solid var(--dsw-alias-border-l3, rgba(0,0,0,0.08))", paddingBottom: 8, marginBottom: 8 }
-					},
-						h("div", { style: S.row },
-							h("strong", { style: { fontSize: 13 } }, mount.guest),
-							h("span", { style: { flex: 1 } }),
-							h(Button, {
-								onClick: async () => {
-									setMessage(t("busy"));
-									try {
-										const result = await call("/mounts/test", { id: mount.id });
-										setMessage("");
-										setOutput("$ ls -la " + mount.guest + "\n" + (result.output ?? "")
-											+ (result.problem ? "\n⚠ " + result.problem : ""));
-									} catch (error) {
-										setMessage(String(error.message ?? error));
-									}
-								}
-							}, t("mountTest")),
-							h(Button, {
-								onClick: () => act("/mounts/toggle", { id: mount.id, enabled: mount.enabled !== true })
-							}, mount.enabled === true ? "停用" : "启用"),
-							h(Button, { onClick: () => act("/mounts/remove", { id: mount.id }) }, t("remove"))
-						),
-						h("div", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary, #666)", marginTop: 4, wordBreak: "break-all" } }, mount.host),
-						// Why this mount will show nothing, in the user's terms. The
-						// app used to drop unreadable paths from the PRoot command
-						// line, which looked exactly like the feature being broken.
-						mount.problem
-							? h("div", { style: { fontSize: 11, marginTop: 4, color: "#d29922" } }, "⚠ " + mount.problem)
-							: null,
-						mount.enabled !== true
-							? h("div", { style: { fontSize: 11, marginTop: 4, color: "var(--dsw-alias-label-tertiary, #888)" } }, "已停用")
-							: null
-					)),
-				h("div", { style: S.row },
-					h(Button, { kind: "primary", onClick: () => act("/mounts/pick", {}) }, t("mountPick"))
-				),
-				h("div", { style: S.label }, t("mountHost") + " → " + t("mountGuest")),
-				h("div", { style: S.row },
-					h("input", {
-						value: host,
-						placeholder: "/storage/emulated/0/Documents",
-						style: Object.assign({}, fieldStyle(), { flex: 2 }),
-						onChange: (event) => setHost(event.target.value)
-					}),
-					h("input", {
-						value: guest,
-						placeholder: "/mnt/docs",
-						style: Object.assign({}, fieldStyle(), { flex: 1 }),
-						onChange: (event) => setGuest(event.target.value)
-					}),
-					h(Button, { onClick: () => act("/mounts/add", { host, guest }) }, t("mountAdd"))
-				),
-				message !== "" ? h("div", { style: { fontSize: 12, marginTop: 8, color: "var(--dsw-alias-label-secondary, #666)" } }, message) : null,
-				output !== ""
-					? h("pre", { style: Object.assign({}, S.mono, { marginTop: 8, maxHeight: 160 }) }, output)
-					: null,
-				h("div", { style: S.row },
-					h(Button, { kind: "primary", onClick: () => act("/server/restart", {}) }, t("mountRestart"))
-				),
-				h("div", { style: { fontSize: 11, marginTop: 6, color: "var(--dsw-alias-label-tertiary, #888)" } }, t("mountHint"))
-			);
+					? h("p", { className: "dsa-hint" }, t("mountEmpty"))
+					: h("ul", { className: "dsa-list" }, mounts.map((mount) => h("li", { key: mount.id },
+						h(Card, null,
+							h("div", { className: "dsa-spread" },
+								h("div", { className: "dsa-inline" },
+									h("span", { className: "dsa-strong" }, mount.guest),
+									mount.enabled !== true ? h(Tag, { tone: "quiet" }, t("mountDisabled")) : null),
+								h("div", { className: "dsa-actions" },
+									h(Button, {
+										variant: "outline", size: "sm",
+										onClick: async () => {
+											setMessage(t("busy"));
+											try {
+												const result = await call("/mounts/test", { id: mount.id });
+												setMessage("");
+												setOutput("$ ls -la " + mount.guest + "\n" + (result.output ?? "")
+													+ (result.problem ? "\n⚠ " + result.problem : ""));
+											} catch (error) {
+												setMessage(String(error.message ?? error));
+											}
+										}
+									}, t("mountTest")),
+									h(Button, {
+										variant: "ghost", size: "sm",
+										onClick: () => act("/mounts/toggle", { id: mount.id, enabled: mount.enabled !== true })
+									}, mount.enabled === true ? t("mountDisable") : t("mountEnable")),
+									h(Button, {
+										variant: "ghost", size: "sm",
+										onClick: () => act("/mounts/remove", { id: mount.id })
+									}, t("remove")))),
+							h("div", { className: "dsa-desc dsa-mono" }, mount.host),
+							// Why this mount shows nothing, in the user's terms. The app used
+							// to drop unreadable paths from the PRoot command line, which
+							// looked exactly like the feature being broken.
+							mount.problem
+								? h("div", { className: "dsa-warn" }, "⚠ " + mount.problem)
+								: null)))),
+				h("div", { className: "dsa-actions" },
+					h(Button, { variant: "primary", onClick: () => act("/mounts/pick", {}) }, t("mountPick"))),
+				h(Card, null,
+					h("div", { className: "dsa-field" },
+						h("label", { className: "dsa-fieldLabel" }, t("mountHost") + " → " + t("mountGuest")),
+						h("div", { className: "dsa-inputRow" },
+							h(TextInput, {
+								grow: true,
+								value: host,
+								placeholder: "/storage/emulated/0/Documents",
+								onChange: (event) => setHost(event.target.value)
+							}),
+							h(TextInput, {
+								grow: true,
+								value: guest,
+								placeholder: "/mnt/docs",
+								onChange: (event) => setGuest(event.target.value)
+							}),
+							h(Button, { variant: "outline", onClick: () => act("/mounts/add", { host, guest }) }, t("mountAdd")))),
+					output !== ""
+						? h("pre", { className: "dsa-pre" }, output)
+						: null,
+					h("hr", { className: "dsa-sep" }),
+					h("div", { className: "dsa-actions" },
+						h(Button, { variant: "outline", onClick: () => act("/server/restart", {}) }, t("mountRestart"))),
+					h("p", { className: "dsa-hint" }, t("mountHint"))),
+				message !== "" ? h("p", { className: "dsa-hint" }, message) : null);
 		}
 
 		function ExportCard(props) {
@@ -473,31 +619,37 @@ window.__ModuleLoader__.load({
 					setMessage(String(error.message ?? error));
 				}
 			};
-			return h("div", { style: S.card },
-				h("div", { style: S.label }, t("exportRecent")),
-				recent === null
-					? h("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary, #666)" } }, t("busy"))
-					: recent.length === 0
-						? h("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary, #666)" } }, t("exportEmpty"))
-						: recent.slice(0, 8).map((file) => h("div", { key: file.path, style: Object.assign({}, S.row, { marginBottom: 6 }) },
-							h("span", {
-								style: { fontSize: 12, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
-							}, file.path),
-							h(Button, { onClick: () => doExport(file.path) }, t("export"))
-						)),
-				h("div", { style: S.label }, t("exportPath")),
-				h("div", { style: S.row },
-					h("input", {
-						value: path,
-						placeholder: "/root/1/tool-test-report.md",
-						style: Object.assign({}, fieldStyle(), { flex: 1 }),
-						onChange: (event) => setPath(event.target.value)
-					}),
-					h(Button, { kind: "primary", onClick: () => doExport(path) }, t("export"))
-				),
-				message !== "" ? h("div", { style: { fontSize: 12, marginTop: 8, color: "var(--dsw-alias-label-secondary, #666)" } }, message) : null,
-				h("div", { style: { fontSize: 11, marginTop: 6, color: "var(--dsw-alias-label-tertiary, #888)" } }, t("exportHint"))
-			);
+			return h(Group, { title: t("exportTitle") },
+				h(Card, null,
+					h("div", { className: "dsa-field" },
+						h("label", { className: "dsa-fieldLabel" }, t("exportPath")),
+						h("div", { className: "dsa-inputRow" },
+							h(TextInput, {
+								grow: true,
+								value: path,
+								placeholder: "/root/report.md",
+								onChange: (event) => setPath(event.target.value)
+							}),
+							h(Button, { variant: "primary", onClick: () => doExport(path) }, t("export"))),
+						h("p", { className: "dsa-hint" }, t("exportHint"))),
+					h("hr", { className: "dsa-sep" }),
+					h("div", { className: "dsa-field" },
+						h("span", { className: "dsa-fieldLabel" }, t("exportRecent")),
+						recent === null
+							? h("p", { className: "dsa-hint" }, t("busy"))
+							: recent.length === 0
+								? h("p", { className: "dsa-hint" }, t("exportEmpty"))
+								: h("div", null, recent.slice(0, 8).map((file) => h("div", {
+									key: file.path,
+									className: "dsa-spread",
+									style: { padding: "6px 0" }
+								},
+									h("span", { className: "dsa-desc dsa-mono dsa-ellipsis" }, file.path),
+									h(Button, {
+										variant: "outline", size: "sm",
+										onClick: () => doExport(file.path)
+									}, t("export"))))))),
+				message !== "" ? h("p", { className: "dsa-hint" }, message) : null);
 		}
 
 		/**
@@ -527,32 +679,16 @@ window.__ModuleLoader__.load({
 					setMessage(String(error.message ?? error));
 				}
 			};
-			return h("span", { style: { display: "inline-flex", alignItems: "center", gap: 6 } },
-				h(Button, { style: { minHeight: 26, padding: "2px 8px", fontSize: 12 }, onClick: run }, t("export")),
-				message === "" ? null : h("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary, #666)" } }, message)
-			);
+			return h("span", { className: "dsa-inline" },
+				h(Button, { variant: "ghost", size: "sm", onClick: run }, t("export")),
+				message === "" ? null : h("span", { className: "dsa-hint" }, message));
 		}
-
-		function HotCard(props) {
-			const t = props.t;
-			const packaged = props.packaged ?? "";
-			const applied = props.applied ?? "";
-			return h("div", { style: S.card },
-				h("div", { style: S.row },
-					h("strong", { style: { fontSize: 13 } }, t("hotTitle")),
-					h("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary, #666)" } },
-						(applied === "" ? t("hotCurrent").replace("%s", packaged) : t("hotApplied").replace("%s", applied)))
-				),
-				h("div", { style: { fontSize: 11, marginTop: 6, color: "var(--dsw-alias-label-tertiary, #888)" } }, t("hotHint"))
-			);
-		}
-
 
 		function UpdateCard(props) {
 			const t = props.t;
 			const app = props.app ?? "";
-			const applied = props.applied ?? "";
 			const packaged = props.packaged ?? "";
+			const applied = props.applied ?? "";
 			const versionCode = props.versionCode ?? 0;
 			const [state, setState] = react.useState("idle");
 			const [info, setInfo] = react.useState(null);
@@ -566,7 +702,7 @@ window.__ModuleLoader__.load({
 				setMessage("");
 				try {
 					const data = await call("/update/check", {});
-					if (data.ok !== true) throw new Error(data.error ?? "未知错误");
+					if (data.ok !== true) throw new Error(data.error ?? t("failed"));
 					setInfo(data);
 					setState("done");
 				} catch (error) {
@@ -581,98 +717,170 @@ window.__ModuleLoader__.load({
 			const appNew = info !== null && info.app !== undefined
 				&& (info.app.versionCode ?? 0) > versionCode;
 
-			return h("div", { style: S.card },
-				h("div", { style: S.row },
-					h("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary, #666)" } },
-						t("updChannels").replace("%s", app).replace("%s", current || "-")),
-					h("span", { style: { flex: 1 } }),
-					h(Button, { onClick: check, disabled: state === "checking" },
-						state === "checking" ? t("updChecking") : t("updCheck"))
-				),
-				state === "done" && !hotNew && !appNew
-					? h("div", { style: { fontSize: 12, marginTop: 8, color: "var(--dsw-alias-label-secondary, #666)" } },
-						t("updLatest").replace("%s", app))
-					: null,
-				state === "failed"
-					? h("div", { style: { fontSize: 12, marginTop: 8, color: "var(--dsw-alias-label-secondary, #666)" } },
-						t("updFailed").replace("%s", message))
-					: null,
-				hotNew
-					? h("div", { style: { marginTop: 10, paddingTop: 10, borderTop: "0.5px solid var(--dsw-alias-border-l3, rgba(0,0,0,0.08))" } },
-						h("div", { style: { fontSize: 13, fontWeight: 600 } },
-							t("updHotTitle").replace("%s", String(info.hot.version).slice(0, 8))),
-						h("div", { style: { fontSize: 11, margin: "4px 0 8px", color: "var(--dsw-alias-label-secondary, #666)" } },
-							t("updHotHint").replace("%s", String(Math.round((info.hot.bytes ?? 54000) / 1024)))),
+			return h(Group, { title: t("hotTitle") },
+				h(Card, null,
+					h("div", { className: "dsa-spread" },
+						h("span", { className: "dsa-desc" }, t("updChannels").replace("%s", app).replace("%s", current || "-")),
 						h(Button, {
-							kind: "primary",
-							onClick: async () => {
-								setMessage(t("busy"));
-								try {
-									const result = await call("/hot/fetch", { url: info.hot.url });
-									setMessage(result.message ?? result.error ?? "");
-								} catch (error) {
-									setMessage(String(error.message ?? error));
-								}
-							}
-						}, t("updHotApply"))
-					)
-					: null,
-				appNew
-					? h("div", { style: { marginTop: 10, paddingTop: 10, borderTop: "0.5px solid var(--dsw-alias-border-l3, rgba(0,0,0,0.08))" } },
-						h("div", { style: { fontSize: 13, fontWeight: 600 } },
-							t("updAppTitle").replace("%s", info.app.version)),
-						h("div", { style: { fontSize: 11, margin: "4px 0 8px", color: "var(--dsw-alias-label-secondary, #666)" } },
-							t("updAppHint").replace("%s", "143")),
-						h(Button, {
-							onClick: () => call("/open-url", { url: info.app.page ?? info.app.url })
-						}, t("updAppDownload"))
-					)
-					: null,
-				message !== "" ? h("div", { style: { fontSize: 12, marginTop: 8, color: "var(--dsw-alias-label-secondary, #666)" } }, message) : null
-			);
+							variant: "outline", size: "sm",
+							disabled: state === "checking",
+							onClick: check
+						}, state === "checking" ? t("updChecking") : t("updCheck"))),
+					state === "done" && !hotNew && !appNew
+						? h("p", { className: "dsa-hint" }, t("updLatest").replace("%s", app))
+						: null,
+					state === "failed"
+						? h("p", { className: "dsa-hint" }, t("updFailed").replace("%s", message))
+						: null,
+					hotNew
+						? h("div", null,
+							h("hr", { className: "dsa-sep" }),
+							h("div", { className: "dsa-field" },
+								h("span", { className: "dsa-strong" },
+									t("updHotTitle").replace("%s", String(info.hot.version).slice(0, 8))),
+								h("p", { className: "dsa-hint" },
+									t("updHotHint").replace("%s", String(Math.round((info.hot.bytes ?? 54000) / 1024)))),
+								h("div", { className: "dsa-actions" },
+									h(Button, {
+										variant: "primary",
+										onClick: async () => {
+											setMessage(t("busy"));
+											try {
+												const result = await call("/hot/fetch", { url: info.hot.url });
+												setMessage(result.message ?? result.error ?? "");
+											} catch (error) {
+												setMessage(String(error.message ?? error));
+											}
+										}
+									}, t("updHotApply")))))
+						: null,
+					appNew
+						? h("div", null,
+							h("hr", { className: "dsa-sep" }),
+							h("div", { className: "dsa-field" },
+								h("span", { className: "dsa-strong" }, t("updAppTitle").replace("%s", info.app.version)),
+								h("p", { className: "dsa-hint" }, t("updAppHint").replace("%s", "143")),
+								h("div", { className: "dsa-actions" },
+									h(Button, {
+										variant: "outline",
+										onClick: () => call("/open-url", { url: info.app.page ?? info.app.url })
+									}, t("updAppDownload")))))
+						: null,
+					message !== "" ? h("p", { className: "dsa-hint" }, message) : null),
+				h("p", { className: "dsa-hint" }, t("hotHint")));
 		}
 
 		function ShizukuCard(props) {
+			const t = props.t;
 			const [output, setOutput] = react.useState("");
 			const [command, setCommand] = react.useState("id");
 			const shizuku = props.shizuku ?? {};
-			const state = shizuku.installed !== true ? props.t("unavailable")
-				: shizuku.granted === true ? props.t("granted") : props.t("denied");
-			const colour = shizuku.granted === true ? "#3fb950" : "#d29922";
-			return h("div", { style: S.card },
-				h("div", { style: S.row },
-					h("span", { style: Object.assign({}, S.dot, { background: colour }) }),
-					h("strong", { style: { fontSize: 13 } }, state),
-					shizuku.version !== undefined ? h("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary, #666)" } }, "Shizuku " + String(shizuku.version)) : null,
-					h("span", { style: { flex: 1 } }),
-					shizuku.installed === true && shizuku.granted !== true
-						? h(Button, { kind: "primary", onClick: () => props.act("/shizuku/request") }, props.t("request"))
-						: null
-				),
-				h("div", { style: S.label }, props.t("testCommand")),
-				h("div", { style: S.row },
-					h("input", {
-						value: command,
-						style: Object.assign({}, fieldStyle(), { flex: 1 }),
-						onChange: (event) => setCommand(event.target.value)
-					}),
-					h(Button, {
-						disabled: shizuku.granted !== true,
-						onClick: async () => {
-							try {
-								const result = await call("/shizuku/exec", { command });
-								setOutput("exit " + result.exit + "\n" + (result.stdout ?? "") + (result.stderr ?? ""));
-							} catch (error) {
-								setOutput(String(error.message ?? error));
-							}
-						}
-					}, props.t("run"))
-				),
-				output !== "" ? h("div", { style: Object.assign({}, S.mono, { marginTop: 8 }) }, output) : null
-			);
+			const state = shizuku.installed !== true ? t("unavailable")
+				: shizuku.granted === true ? t("granted") : t("denied");
+			const dot = shizuku.granted === true ? "done" : "warning";
+			return h(Group, { title: t("shizuku") },
+				h(Card, null,
+					h("div", { className: "dsa-spread" },
+						h("div", { className: "dsa-inline" },
+							shizuku.installed === true ? h(StateDot, { state: dot }) : null,
+							h("span", { className: "dsa-strong" }, state),
+							shizuku.version !== undefined
+								? h("span", { className: "dsa-hint" }, "Shizuku " + String(shizuku.version))
+								: null),
+						shizuku.installed === true && shizuku.granted !== true
+							? h(Button, { variant: "primary", onClick: () => props.act("/shizuku/request") }, t("request"))
+							: null),
+					h("hr", { className: "dsa-sep" }),
+					h("div", { className: "dsa-field" },
+						h("label", { className: "dsa-fieldLabel" }, t("testCommand")),
+						h("div", { className: "dsa-inputRow" },
+							h(TextInput, {
+								grow: true,
+								value: command,
+								onChange: (event) => setCommand(event.target.value)
+							}),
+							h(Button, {
+								variant: "outline",
+								disabled: shizuku.granted !== true,
+								onClick: async () => {
+									try {
+										const result = await call("/shizuku/exec", { command });
+										setOutput("exit " + result.exit + "\n" + (result.stdout ?? "") + (result.stderr ?? ""));
+									} catch (error) {
+										setOutput(String(error.message ?? error));
+									}
+								}
+							}, t("run")))),
+					output !== "" ? h("pre", { className: "dsa-pre" }, output) : null));
 		}
 
-		function AndroidSection(props) {			const t = (key) => props.t(key);
+		function SettingsCard(props) {
+			const t = props.t;
+			const [form, setForm] = react.useState(null);
+			react.useEffect(() => {
+				if (props.settings !== undefined) setForm(Object.assign({}, props.settings));
+			}, [props.settings]);
+			if (form === null) return null;
+			const update = (key, value) => setForm(Object.assign({}, form, { [key]: value }));
+			return h(Group, { title: t("settings") },
+				h(Card, null,
+					h(Field, {
+						id: "dsa-port",
+						label: t("port"),
+						hint: t("portHint"),
+						control: h(TextInput, {
+							id: "dsa-port",
+							inputMode: "numeric",
+							value: String(form.port ?? ""),
+							onChange: (event) => update("port", event.target.value)
+						})
+					}),
+					h(Field, {
+						id: "dsa-api-key",
+						label: t("apiKey"),
+						hint: t("apiKeyHint"),
+						control: h(TextInput, {
+							id: "dsa-api-key",
+							type: "password",
+							placeholder: "sk-…",
+							value: form.apiKey ?? "",
+							onChange: (event) => update("apiKey", event.target.value)
+						})
+					}),
+					h(ToggleRow, {
+						title: t("share"),
+						checked: form.shareStorage === true,
+						onChange: (value) => update("shareStorage", value)
+					}),
+					h(ToggleRow, {
+						title: t("keepAwake"),
+						checked: form.keepAwake === true,
+						onChange: (value) => update("keepAwake", value)
+					}),
+					h(ToggleRow, {
+						title: t("autoRestart"),
+						checked: form.autoRestart === true,
+						onChange: (value) => update("autoRestart", value)
+					}),
+					h("div", { className: "dsa-foot" },
+						h(Button, {
+							variant: "primary",
+							onClick: async () => {
+								const port = parseInt(String(form.port), 10);
+								await call("/settings", {
+									port: Number.isFinite(port) ? port : 3080,
+									apiKey: form.apiKey ?? "",
+									shareStorage: form.shareStorage === true,
+									keepAwake: form.keepAwake === true,
+									autoRestart: form.autoRestart === true
+								});
+								if (props.onSaved) await props.onSaved();
+							}
+						}, t("save")))));
+		}
+
+		function AndroidSection(props) {
+			const t = (key) => props.t(key);
 			const [snapshot, setSnapshot] = react.useState(null);
 			const [error, setError] = react.useState(null);
 			const [message, setMessage] = react.useState(null);
@@ -696,18 +904,14 @@ window.__ModuleLoader__.load({
 				};
 			}, [tick]);
 
-			if (bridge() === null) {
-				return h("div", { style: { padding: "0 0 24px" } },
-					h("div", { style: S.h }, t("title")),
-					h("div", { style: S.card }, t("noBridge"))
-				);
-			}
-			if (snapshot === null) {
-				return h("div", { style: { padding: "0 0 24px" } },
-					h("div", { style: S.h }, t("title")),
-					h("div", { style: S.card }, error === null ? t("busy") : error)
-				);
-			}
+			/** One page chrome for every state, so a slow bridge still looks like the shell. */
+			const shell = (body) => h("div", { className: "dsa-root" },
+				h("h2", { className: "dsa-heading" }, t("title")),
+				h("p", { className: "dsa-intro" }, t("subtitle")),
+				body);
+
+			if (bridge() === null) return shell(h("p", { className: "dsa-hint" }, t("noBridge")));
+			if (snapshot === null) return shell(h("p", { className: "dsa-hint" }, error === null ? t("busy") : error));
 
 			const act = async (path) => {
 				setMessage(t("busy"));
@@ -727,128 +931,70 @@ window.__ModuleLoader__.load({
 				}
 			};
 
-			const hotState = (props.applied ?? "") === "" ? t("hotBakedIn") : t("hotImported");
-			return h("div", { style: { padding: "0 0 24px" } },
-				h("div", { style: S.h }, t("title")),
+			const hotState = (snapshot.hotVersion ?? "") === "" ? t("hotBakedIn") : t("hotImported");
+			return h("div", { className: "dsa-root" },
+				h("h2", { className: "dsa-heading" }, t("title")),
+				h("p", { className: "dsa-intro" }, t("subtitle")),
 				// Which build is this? Without it, an older plugin on a device is
 				// indistinguishable from a feature that was never written.
-				h("div", {
-					style: { fontSize: 11, marginBottom: 6, color: "var(--dsw-alias-label-tertiary, #888)" },
+				h("p", {
+					className: "dsa-meta",
 					"data-dsh-android-version": (snapshot.appVersion ?? "") + "/" + (snapshot.hotVersion || snapshot.packagedHotVersion || "")
 				}, t("verLine")
 					.replace("%s", snapshot.appVersion ?? "?")
 					.replace("%s", String(snapshot.hotVersion || snapshot.packagedHotVersion || "-").slice(0, 8))
 					.replace("%s", hotState)),
-				h("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary, #666)", marginBottom: 12 } }, t("subtitle")),
 
-				h(StatusCard, { status: snapshot.status, t, act, message }),
+				h(Group, { title: t("status") },
+					h(StatusCard, { status: snapshot.status, t, act, message })),
 
-				h("div", { style: S.h }, t("distros")),
-				(snapshot.distros ?? []).map((distro) => h(DistroCard, {
-					key: distro.id,
-					distro,
-					t,
-					onSelect: async (id) => {
-						await call("/distros/select", { id });
-						await reload();
-					},
-					onDelete: async (id) => {
-						await call("/distros/delete", { id });
-						await reload();
-					},
-					onCommand: async (id, command) => {
-						await call("/distros/command", { id, command });
-						setMessage("saved");
-						await reload();
-					}
-				})),
-
-				h("div", { style: S.h }, t("hotTitle")),
-			h(UpdateCard, {
-				t,
-				app: snapshot.appVersion,
-				versionCode: snapshot.appVersionCode,
-				packaged: snapshot.packagedHotVersion,
-				applied: snapshot.hotVersion
-			}),
-			h(HotCard, { t, packaged: snapshot.packagedHotVersion, applied: snapshot.hotVersion }),
-
-			h("div", { style: S.h }, t("exportTitle")),
-			h(ExportCard, { t }),
-
-			h("div", { style: S.h }, t("mounts")),
-			h(MountsCard, { t, mounts: snapshot.mounts, onChanged: reload }),
-
-			h("div", { style: S.h }, t("shizuku")),
-				h(ShizukuCard, { shizuku: snapshot.shizuku, t, act }),
-
-				h("div", { style: S.h }, t("settings")),
-				h(SettingsCard, { settings: snapshot.settings, t, onSaved: reload }),
-
-				h("div", { style: S.h }, t("log")),
-				h("div", { style: S.row },
-					h(Button, { onClick: reload }, t("refresh")),
-					h(Button, {
-						onClick: async () => {
-							await call("/log/clear", {});
+				h(Group, { title: t("distros") },
+					h("ul", { className: "dsa-list" }, (snapshot.distros ?? []).map((distro) => h(DistroCard, {
+						key: distro.id,
+						distro,
+						t,
+						onSelect: async (id) => {
+							await call("/distros/select", { id });
+							await reload();
+						},
+						onDelete: async (id) => {
+							await call("/distros/delete", { id });
+							await reload();
+						},
+						onCommand: async (id, command) => {
+							await call("/distros/command", { id, command });
+							setMessage(t("saved"));
 							await reload();
 						}
-					}, t("clear"))
-				),
-				h("div", { style: Object.assign({}, S.mono, { marginTop: 8 }) }, (snapshot.log ?? []).join("\n") || "（无输出）")
-			);
-		}
+					})))),
 
-		function SettingsCard(props) {
-			const t = props.t;
-			const [form, setForm] = react.useState(null);
-			react.useEffect(() => {
-				if (props.settings !== undefined) setForm(Object.assign({}, props.settings));
-			}, [props.settings]);
-			if (form === null) return null;
-			const update = (key, value) => setForm(Object.assign({}, form, { [key]: value }));
-			return h("div", { style: S.card },
-				h("div", { style: S.label }, t("port")),
-				h("input", {
-					value: String(form.port ?? ""),
-					inputMode: "numeric",
-					style: fieldStyle(),
-					onChange: (event) => update("port", event.target.value)
+				h(UpdateCard, {
+					t,
+					app: snapshot.appVersion,
+					versionCode: snapshot.appVersionCode,
+					packaged: snapshot.packagedHotVersion,
+					applied: snapshot.hotVersion
 				}),
-				h("div", { style: S.label }, t("apiKey")),
-				h("input", {
-					type: "password",
-					value: form.apiKey ?? "",
-					style: fieldStyle(),
-					onChange: (event) => update("apiKey", event.target.value)
-				}),
-				[["shareStorage", "share"], ["keepAwake", "keepAwake"], ["autoRestart", "autoRestart"]].map(([key, label]) => h("label", {
-					key,
-					style: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginTop: 10 }
-				},
-					h("input", {
-						type: "checkbox",
-						checked: form[key] === true,
-						onChange: (event) => update(key, event.target.checked)
-					}),
-					t(label)
-				)),
-				h(Button, {
-					kind: "primary",
-					style: { marginTop: 12 },
-					onClick: async () => {
-						const port = parseInt(String(form.port), 10);
-						await call("/settings", {
-							port: Number.isFinite(port) ? port : 3080,
-							apiKey: form.apiKey ?? "",
-							shareStorage: form.shareStorage === true,
-							keepAwake: form.keepAwake === true,
-							autoRestart: form.autoRestart === true
-						});
-						if (props.onSaved) await props.onSaved();
-					}
-				}, t("save"))
-			);
+
+				h(ExportCard, { t }),
+
+				h(MountsCard, { t, mounts: snapshot.mounts, onChanged: reload }),
+
+				h(ShizukuCard, { shizuku: snapshot.shizuku, t, act }),
+
+				h(SettingsCard, { settings: snapshot.settings, t, onSaved: reload }),
+
+				h(Group, { title: t("log") },
+					h("div", { className: "dsa-actions" },
+						h(Button, { variant: "outline", size: "sm", onClick: reload }, t("refresh")),
+						h(Button, {
+							variant: "ghost", size: "sm",
+							onClick: async () => {
+								await call("/log/clear", {});
+								await reload();
+							}
+						}, t("clear"))),
+					h("pre", { className: "dsa-pre" }, (snapshot.log ?? []).join("\n") || t("logEmpty"))));
 		}
 
 		/* ====================================================================
@@ -1173,6 +1319,7 @@ window.__ModuleLoader__.load({
 					h("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary, #666)" } }, endpoint === null ? "" : `${endpoint.url} · ${statusText}`),
 					h("span", { style: { flex: 1 } }),
 					h(Button, {
+						variant: "outline", size: "sm",
 						onClick: () => {
 							if (termRef.current !== null && socketRef.current !== null && socketRef.current.readyState === 1) {
 								termRef.current.clear();
@@ -1203,11 +1350,8 @@ window.__ModuleLoader__.load({
 						autoCorrect: "off",
 						autoCapitalize: "none",
 						enterKeyHint: "send",
-						style: Object.assign({}, fieldStyle(), {
-							flex: 1,
-							fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-							fontSize: 13
-						}),
+						className: "dsa-input",
+						style: { flex: 1 },
 						onChange: (event) => setDraft(event.target.value),
 						onKeyDown: (event) => {
 							if (event.key === "Enter") {
@@ -1222,8 +1366,8 @@ window.__ModuleLoader__.load({
 							}
 						}
 					}),
-					h(Button, { onClick: () => sendLine() }, t("termSend")),
-					h(Button, { onClick: paste }, t("termPaste"))
+					h(Button, { variant: "primary", size: "sm", onClick: () => sendLine() }, t("termSend")),
+					h(Button, { variant: "ghost", size: "sm", onClick: paste }, t("termPaste"))
 				)
 			);
 		}
@@ -1239,6 +1383,9 @@ window.__ModuleLoader__.load({
 		function apply(ctx) {
 			const t = ctx.locale.bind(NS);
 			ctx.effect(() => ctx.locale.register(NS, { zh, en }), "dsh-plugin-android: dictionaries");
+			// The page draws itself in the shell's vocabulary, so its stylesheet
+			// rides the same effect: mounted with the plugin, removed with it.
+			ctx.effect(() => mountStyles(), "dsh-plugin-android: page styles");
 			ctx.slots.inject("settings.section", () => ctx.slots.register({
 				name: "settings.section",
 				id: "android",

@@ -7,7 +7,9 @@
 # executed through qemu with the staged Debian loader prefix.
 set -eu
 
-ROOT=/var/minis/workspace/dsh-android
+# The tree this script lives in, so a clone builds wherever it is checked out.
+# Override with DSH_SRC_DIR when driving it from a separate build directory.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_VERSION="${APP_VERSION:-$(cat "$ROOT/VERSION" 2>/dev/null || echo 1.0.0)}"
 APP="$ROOT/app"
 BUILD="$ROOT/build"
