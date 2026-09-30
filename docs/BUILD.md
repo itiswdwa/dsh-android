@@ -59,7 +59,9 @@ sh scripts/build_apk.sh            # → out/dsh-android.apk
 
 ## 提交改动
 
-源码在 `/var/minis/workspace/dsh-android/` 构建，git 检出在 `/var/minis/workspace/dsh-android-repo/`。
+源码树就是脚本所在的位置（`build_apk.sh` / `assemble_payload.sh` / `sync_repo.sh` 都按自己
+`$0` 的上级目录定位），git 检出默认放在同级的 `dsh-android-repo/`；两者都可以用
+`DSH_SRC_DIR` / `DSH_REPO_DIR` 覆盖。
 一条命令同步 + 提交 + 推送：
 
 ```sh
@@ -73,6 +75,24 @@ sh scripts/sync_repo.sh "这次改了什么"
 - remote 固定用 SSH（沙箱里的是部署密钥，HTTPS 会要一个读不到的用户名）。
 
 构建产物、图标、载荷、签名密钥都不进仓库。
+
+## 发版：先想清楚是哪一种
+
+两条通道的成本差三个数量级，选错一次就是十分钟加 143 MB 白跑：
+
+| 改了什么 | 走哪条 | 命令 | 代价 |
+|---|---|---|---|
+| 插件（界面、提示词）、技能、`payload/opt` 里的沙箱脚本 | **热更新** | `sh scripts/release_hot.sh` | 约 1 分钟，80 KB |
+| 应用 Java 代码、资源、图标、载荷里的 rootfs（新装的包/依赖） | **应用更新** | `make_payload_zip` → `build_apk.sh` → `sh scripts/release.sh` | 约 15 分钟，143 MB |
+
+也就是说：**只改 `plugin/` 或 `payload/` 时不要碰 `VERSION`，也不要重新出 APK**。
+`release_hot.sh` 会把新热包挂到*当前*那版 release 上（APK 资产原地不动），重新生成
+`update.json` 的 `hot` 段，把说明写进 `docs/releases/hot-<短哈希>.md` 并附到 release 正文的
+`<!-- hot-notes -->` 之后，最后推送清单 —— 顺序是先上资产再推清单，所以应用永远不会读到
+一个指向不存在文件的清单。
+
+应用更新才需要抬 `VERSION`；`release.sh` 可重入，中途断掉再跑一次即可补齐资产。
+出包的完整步骤见上面的[三步](#三步)。
 
 ## 签名
 

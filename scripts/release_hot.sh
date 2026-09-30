@@ -35,8 +35,15 @@ python3 "$ROOT/scripts/make_update_manifest.py" "$ROOT"
 HASH=$(python3 -c 'import json,pathlib,sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["hot"]["version"])' "$ROOT/update.json")
 echo "   hot $HASH"
 
-NOTES="${1:-$ROOT/docs/releases/hot-$HASH.md}"
-[ -f "$NOTES" ] || { NOTES=""; echo "   没有 $ROOT/docs/releases/hot-$HASH.md，正文只更新热包段落"; }
+NOTES="${1:-}"
+if [ -z "$NOTES" ]; then
+  # Notes are filed under the short hash (docs/releases/hot-f54540f5.md) because
+  # that is also what the settings page shows; accept the full one too.
+  for candidate in "$ROOT/docs/releases/hot-$HASH.md" "$ROOT/docs/releases/hot-$(echo "$HASH" | cut -c1-8).md"; do
+    [ -f "$candidate" ] && NOTES="$candidate" && break
+  done
+fi
+[ -n "$NOTES" ] && [ -f "$NOTES" ] || { NOTES=""; echo "   没有说明文件，正文只写热包段落标题"; }
 
 echo "== 3/5 定位 release =="
 RELEASE_JSON="$BUILD/release.json"
