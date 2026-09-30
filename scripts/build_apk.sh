@@ -51,7 +51,9 @@ QEMU_LD_PREFIX=/opt/android/root64 qemu-x86_64 "$AAPT2" link \
   "$RES_FLAT/res.zip"
 
 echo "== hot overlay =="
-python3 "$ROOT/scripts/make_hot_zip.py" "$ROOT" "$BUILD/hot-assets/hot.zip"
+# --base: an app build bakes in the base package of its own version, which
+# is published as plain <app> until the first hot update of that line.
+python3 "$ROOT/scripts/make_hot_zip.py" "$ROOT" "$BUILD/hot-assets/hot.zip" --base
 
 echo "== update manifest =="
 python3 "$ROOT/scripts/make_update_manifest.py" "$ROOT"

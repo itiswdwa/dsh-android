@@ -737,7 +737,7 @@ window.__ModuleLoader__.load({
 							h("hr", { className: "dsa-sep" }),
 							h("div", { className: "dsa-field" },
 								h("span", { className: "dsa-strong" },
-									t("updHotTitle").replace("%s", String(info.hot.version).slice(0, 8))),
+									t("updHotTitle").replace("%s", String(info.hot.version))),
 								h("p", { className: "dsa-hint" },
 									t("updHotHint").replace("%s", String(Math.round((info.hot.bytes ?? 54000) / 1024)))),
 								h("div", { className: "dsa-actions" },
@@ -942,7 +942,7 @@ window.__ModuleLoader__.load({
 					"data-dsh-android-version": (snapshot.appVersion ?? "") + "/" + (snapshot.hotVersion || snapshot.packagedHotVersion || "")
 				}, t("verLine")
 					.replace("%s", snapshot.appVersion ?? "?")
-					.replace("%s", String(snapshot.hotVersion || snapshot.packagedHotVersion || "-").slice(0, 8))
+					.replace("%s", String(snapshot.hotVersion || snapshot.packagedHotVersion || "-"))
 					.replace("%s", hotState)),
 
 				h(Group, { title: t("status") },

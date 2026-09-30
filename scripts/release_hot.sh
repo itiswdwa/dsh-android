@@ -32,14 +32,21 @@ echo "== 2/5 更新清单 =="
 # Regenerated from VERSION + the zip we just built, so the hash the app compares
 # against and the asset uploaded below cannot disagree.
 python3 "$ROOT/scripts/make_update_manifest.py" "$ROOT"
-HASH=$(python3 -c 'import json,pathlib,sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["hot"]["version"])' "$ROOT/update.json")
-echo "   hot $HASH"
+VERSION=$(python3 -c 'import json,pathlib,sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["hot"]["version"])' "$ROOT/update.json")
+HASH=$(python3 -c '
+import json, sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    print(json.loads(archive.read("hot.json")).get("hash", ""))
+' "$HOT")
+echo "   hot $VERSION (content $HASH)"
 
 NOTES="${1:-}"
 if [ -z "$NOTES" ]; then
-  # Notes are filed under the short hash (docs/releases/hot-f54540f5.md) because
-  # that is also what the settings page shows; accept the full one too.
-  for candidate in "$ROOT/docs/releases/hot-$HASH.md" "$ROOT/docs/releases/hot-$(echo "$HASH" | cut -c1-8).md"; do
+  # Notes are filed by version — docs/releases/hot-1.1.4-sp1.md — which is what
+  # the settings page shows. The content hash stays as a fallback for packages
+  # published before versions were readable.
+  for candidate in "$ROOT/docs/releases/hot-$VERSION.md" \
+                   "$ROOT/docs/releases/hot-$(echo "$HASH" | cut -c1-8).md"; do
     [ -f "$candidate" ] && NOTES="$candidate" && break
   done
 fi
@@ -113,10 +120,10 @@ else
   echo "== 推送清单 =="
   # update.json is what the app polls; the release assets are already live, so
   # pushing last keeps the manifest from ever pointing at a missing asset.
-  sh "$ROOT/scripts/sync_repo.sh" "热更新包 $HASH" | tail -1
+  sh "$ROOT/scripts/sync_repo.sh" "热更新包 $VERSION" | tail -1
   echo "   update.json 已推送"
 fi
 
 echo "== 完成 =="
 echo "https://github.com/$REPO/releases"
-echo "应用内：设置 → 安卓沙箱 → 检查更新 → 应用热更新（热包 $HASH）"
+echo "应用内：设置 → 安卓沙箱 → 检查更新 → 应用热更新（热包 $VERSION）"

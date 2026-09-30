@@ -22,7 +22,7 @@ done
 cp "$SRC/README.md" "$SRC/THIRD_PARTY.md" "$SRC/.gitignore" "$REPO/"
 # VERSION and update.json are release metadata: the app reads the manifest to
 # decide whether a hot package or a new APK is waiting.
-cp "$SRC/VERSION" "$SRC/update.json" "$REPO/" 2>/dev/null || true
+cp "$SRC/VERSION" "$SRC/update.json" "$SRC/HOT" "$REPO/" 2>/dev/null || true
 
 cd "$REPO"
 # Generated artefacts (icons, BuildInfo, payloads) are ignored on purpose; drop
