@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 import zipfile
@@ -125,11 +126,21 @@ def main() -> None:
     out = Path(args[1]).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     app = (root / "VERSION").read_text(encoding="utf-8").strip()
+
+    # The guest-side link()/chown() shim is a built artefact that must never be
+    # stale or absent: without it apt/dpkg fail inside the sandbox. Build it
+    # here so any path that can produce a package produces it correctly.
+    build = root / "scripts" / "build_linkfix.sh"
+    if build.is_file():
+        subprocess.run(["sh", str(build)], check=True)
+
     written = 0
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-        for name in ("start-dsh.sh", "pty-server.mjs"):
-            written += add_file(archive, root / "payload" / "opt" / "dsh" / "android" / name,
-                                f"opt/dsh/android/{name}")
+        # The whole guest-side service directory: the entry script, the PTY
+        # service, and the link()/chown() shim with its source. Listing files
+        # one by one here is exactly how a new one ends up missing from a
+        # package, so the directory travels as a unit.
+        written += add_tree(archive, root / "payload" / "opt" / "dsh" / "android", "opt/dsh/android")
         # Distro files we deliberately adjust (see payload/etc/): applied on every
         # launch so a fix here does not force a 400 MB payload re-extraction.
         written += add_tree(archive, root / "payload" / "etc", "etc")

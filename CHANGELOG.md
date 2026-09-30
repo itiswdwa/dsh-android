@@ -35,6 +35,21 @@ _包含 [1.1.4-sp1] 的全部改动。_（`20ac8f9`）
   此前显示的那串 16 位内容哈希不再对外展示
 - 设置页顶部的版本号改为完整显示：原先把 `1.1.4-sp1` 截断成 `1.1.4-sp`
 
+## [1.1.4-sp3] - 2026-09-30
+
+_沙箱里的 apt/dpkg 现在能正常工作；代价是硬链接的"两个名字共享内容"变成了复制，包管理器不依赖那一层。_
+
+### Fixed
+
+- 沙箱里 `apt install` / `dpkg --configure -a` 必定失败（`error creating new backup file
+  '/var/lib/dpkg/status-old': Permission denied`）：Android 不允许应用进程创建硬链接，而 dpkg
+  每写一次数据库都要先用 `link()` 备份 `status`。现在 guest 全局加载一个小兼容层
+  （`/opt/dsh/android/liblinkfix.so`）：`link()` 被内核拒绝时退回复制文件，`git`、`curl`、
+  `python3`、`openssh-server`、`sudo` 等都能正常安装
+- `adduser` / `groupadd` 报 `lock file already used (nlink: 1)`：这些工具用 `link()` 建锁，
+  再检查链接数判断锁是否被占；复制不会让链接数增加，兼容层据此如实回报
+- 安装软件包时 dpkg 把文件属主改成 root 不再以 EPERM 失败（沙箱内本来就是"root"的约定）
+
 ## [1.1.4] - 2026-09-29
 
 ### Fixed

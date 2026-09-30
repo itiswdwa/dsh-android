@@ -22,6 +22,12 @@ ASSETS="$BUILD/payload-assets"
 
 [ -d "$ROOTFS" ] || { echo "no $ROOTFS — build the rootfs first" >&2; exit 1; }
 
+echo "== link shim =="
+# Android denies link() to app processes, which is what makes apt/dpkg fail
+# inside the guest; the shim is built here so the payload never ships a stale or
+# missing copy. See payload/opt/dsh/android/linkfix.c.
+sh "$ROOT/scripts/build_linkfix.sh"
+
 echo "== overlay / =="
 cp -a "$ROOT/payload/." "$ROOTFS/"
 chmod +x "$ROOTFS/opt/dsh/android/start-dsh.sh" "$ROOTFS/usr/local/bin/shiz"
@@ -57,6 +63,7 @@ for f in opt/dsh/android/pty-server.mjs \
          usr/local/bin/node \
          opt/dsh/dsh-home-seed/profiles/web/cordis.patch.yml \
          opt/dsh/dsh-home-seed/profiles/web/node_modules/dsh-plugin-android/lib/client.js \
+         opt/dsh/android/liblinkfix.so etc/ld.so.preload \
          usr/local/bin/shiz bin/bash; do
   [ -e "$ROOTFS/$f" ] || { echo "MISSING: $f" >&2; exit 1; }
 done
