@@ -25,4 +25,8 @@
     <string name="ball_close">收起</string>
     <string name="ball_empty">还没输入内容</string>
     <string name="ball_sent">已交给 DSH</string>
+    <string name="ball_sending">正在交给 DSH…</string>
+    <string name="ball_copied">没找到输入框，已复制到剪贴板</string>
+    <string name="ball_no_composer">页面里没有输入框（先打开会话？）</string>
+    <string name="ball_failed">投递失败</string>
 </resources>

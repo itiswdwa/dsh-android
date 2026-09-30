@@ -73,6 +73,8 @@ public final class BallService extends Service {
     static final int DEFAULT_SIZE_DP = 58;
 
     private static volatile boolean running;
+    /** The instance a delivery result is reported back to. */
+    private static volatile BallService live;
 
     private WindowManager windowManager;
     private WindowManager.LayoutParams ballParams;
@@ -122,6 +124,7 @@ public final class BallService extends Service {
     public void onCreate() {
         super.onCreate();
         running = true;
+        live = this;
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         startForeground(NOTIFICATION_ID, notification());
         showBall();
@@ -136,6 +139,7 @@ public final class BallService extends Service {
     @Override
     public void onDestroy() {
         running = false;
+        live = null;
         stopListening();
         hidePanel();
         handler.removeCallbacks(hideBubble);
@@ -482,8 +486,27 @@ public final class BallService extends Service {
             return;
         }
         hidePanel();
+        say(getString(R.string.ball_sending), 0);
         Assist.deliver(value);
-        say(getString(R.string.ball_sent) + "：" + shorten(value), 4000);
+    }
+
+    /**
+     * What the page did with the words, told back to the bubble.
+     *
+     * "已交给 DSH" was a claim the app could not back up: if the harness had no
+     * composer on screen, the text went nowhere and the ball still said it was
+     * delivered. The status comes from the page itself now.
+     */
+    static void onDeliveryResult(String status) {
+        BallService service = live;
+        if (service == null) return;
+        String text;
+        if ("pasted".equals(status)) text = service.getString(R.string.ball_sent);
+        else if ("clipboard".equals(status)) text = service.getString(R.string.ball_copied);
+        else if ("no-composer".equals(status)) text = service.getString(R.string.ball_no_composer);
+        else if ("empty".equals(status)) text = service.getString(R.string.ball_empty);
+        else text = service.getString(R.string.ball_failed) + "（" + status + "）";
+        service.handler.post(() -> service.say(text, 4000));
     }
 
     private static String shorten(String text) {
@@ -559,16 +582,16 @@ public final class BallService extends Service {
             }
             // Push-to-talk sends on release: that is the whole gesture. The
             // bubble keeps the text on screen so a mis-hearing is visible.
+            say(getString(R.string.ball_sending), 0);
             Assist.deliver(text.trim());
-            say(getString(R.string.ball_sent) + "：" + shorten(text.trim()), 4000);
         }
 
         @Override
         public void onError(int code) {
             listening = false;
             if (heard != null && !heard.trim().isEmpty()) {
+                say(getString(R.string.ball_sending), 0);
                 Assist.deliver(heard.trim());
-                say(getString(R.string.ball_sent) + "：" + shorten(heard.trim()), 4000);
                 return;
             }
             say(code == SpeechRecognizer.ERROR_NO_MATCH

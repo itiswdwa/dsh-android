@@ -545,7 +545,12 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
             web.evaluateJavascript(
                     "(function(){try{return window.__dshAndroidPrompt ? window.__dshAndroidPrompt("
                             + JSONObject.quote(text) + ") : 'no-hook'}catch(e){return String(e)}})()",
-                    value -> App.log("prompt delivery: " + value));
+                    value -> {
+                        App.log("prompt delivery: " + value);
+                        // `value` is a JSON string ("pasted"); strip the quotes
+                        // and tell the ball what actually happened.
+                        BallService.onDeliveryResult(value == null ? "" : value.replace("\"", ""));
+                    });
         });
     }
 

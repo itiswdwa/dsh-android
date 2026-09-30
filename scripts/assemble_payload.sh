@@ -36,18 +36,20 @@ chmod 755 "$ROOTFS/opt/dsh/android"
 echo "== guest home (skills, instructions) =="
 [ -d "$ROOT/payload/home" ] && cp -a "$ROOT/payload/home/." "$ROOTFS/opt/dsh/dsh-home-seed/"
 
-echo "== plugin =="
-rm -rf "$ROOTFS/opt/dsh/dsh-plugin-android"
-cp -a "$ROOT/plugin/dsh-plugin-android" "$ROOTFS/opt/dsh/dsh-plugin-android"
-# The profile resolves the plugin from its own node_modules; a real copy keeps
-# the payload free of symlinks that a tar round-trip would have to preserve.
+echo "== profile (no plugin code) =="
+# The profile's *configuration* ships in the payload; the plugin's *code* does
+# not. It arrives through the hot overlay instead, which the app applies on every
+# launch (including the first one) — that way a plugin fix is a ~90 KB hot
+# package, and the 190 MB runtime stays untouched.
+#
 # The profile ships under /opt (immutable payload), NOT under /root: the app
 # bind-mounts app storage onto /root, which would hide anything staged there.
 SEED="$ROOTFS/opt/dsh/dsh-home-seed"
 mkdir -p "$SEED/profiles/web/node_modules"
 cp -a "$ROOT/profile/." "$SEED/profiles/web/"
-rm -rf "$SEED/profiles/web/node_modules/dsh-plugin-android"
-cp -a "$ROOT/plugin/dsh-plugin-android" "$SEED/profiles/web/node_modules/dsh-plugin-android"
+# Remove anything a previous build left behind: a stale copy here would shadow
+# the hot overlay's, and make the payload depend on the plugin again.
+rm -rf "$ROOTFS/opt/dsh/dsh-plugin-android" "$SEED/profiles/web/node_modules/dsh-plugin-android"
 
 echo "== dsh source patches =="
 python3 "$ROOT/patches/apply-hardlink-patch.py" "$ROOTFS/opt/dsh/node_modules"
@@ -62,7 +64,7 @@ for f in opt/dsh/android/pty-server.mjs \
          usr/local/bin/node bin/bash \
          usr/local/bin/node \
          opt/dsh/dsh-home-seed/profiles/web/cordis.patch.yml \
-         opt/dsh/dsh-home-seed/profiles/web/node_modules/dsh-plugin-android/lib/client.js \
+         opt/dsh/dsh-home-seed/profiles/web/cordis.patch.yml \
          opt/dsh/android/liblinkfix.so etc/ld.so.preload \
          usr/local/bin/shiz bin/bash; do
   [ -e "$ROOTFS/$f" ] || { echo "MISSING: $f" >&2; exit 1; }

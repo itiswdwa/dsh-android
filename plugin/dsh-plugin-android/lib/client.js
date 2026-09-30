@@ -1105,13 +1105,24 @@ window.__ModuleLoader__.load({
 		 * Returns a short status string, which the app only logs.
 		 */
 		function installPromptHook() {
+			/**
+			 * Put text in the composer and send it.
+			 *
+			 * The composer is not a textarea: it is the harness's own rich editor
+			 * (`div[role=textbox][contenteditable]`), and it is controlled — writing
+			 * textContent, dispatching `input`, or execCommand all leave it
+			 * unchanged, because the editor never reads the DOM back. What it does
+			 * handle is a paste, so that is what this sends: a synthetic
+			 * ClipboardEvent carrying the text. The send button then enables on the
+			 * editor's own state update, which is why the click waits a tick.
+			 *
+			 * Returns a short status the app turns into a bubble.
+			 */
 			window.__dshAndroidPrompt = function (text) {
 				const value = String(text ?? "").trim();
 				if (value === "") return "empty";
-				const composer = document.querySelector("textarea");
-				if (composer === null) {
-					// A panel is up, or the app is showing something else: leave the
-					// words on the clipboard instead of losing them.
+				const box = composer();
+				if (box === null) {
 					try {
 						navigator.clipboard.writeText(value);
 						return "clipboard";
@@ -1119,16 +1130,62 @@ window.__ModuleLoader__.load({
 						return "no-composer";
 					}
 				}
-				const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
-				setter.call(composer, value);
-				composer.dispatchEvent(new Event("input", { bubbles: true }));
-				composer.focus();
-				const send = Array.prototype.slice.call(document.querySelectorAll("button"))
-					.find((button) => /发送|Send/i.test(button.getAttribute("aria-label") ?? ""));
-				if (send === null) return "filled";
-				send.click();
-				return "sent";
+				box.focus();
+				let inserted = false;
+				try {
+					const data = new DataTransfer();
+					data.setData("text/plain", value);
+					box.dispatchEvent(new ClipboardEvent("paste", {
+						clipboardData: data, bubbles: true, cancelable: true
+					}));
+					inserted = true;
+				} catch (error) {
+					inserted = false;
+				}
+				if (!inserted) {
+					try {
+						document.execCommand("insertText", false, value);
+						inserted = true;
+					} catch (error) {
+						inserted = false;
+					}
+				}
+				if (!inserted) {
+					try {
+						navigator.clipboard.writeText(value);
+					} catch (error) {
+						/* nothing left to try */
+					}
+					return "clipboard";
+				}
+				// The editor enables the button on its own state update, so the
+				// click retries briefly. The status is returned synchronously —
+				// `evaluateJavascript` can only read a value, not a promise — and
+				// the app turns it into a bubble above the ball.
+				let tries = 0;
+				const attempt = () => {
+					const send = sendButton();
+					if (send !== null && send.disabled !== true) {
+						send.click();
+						return;
+					}
+					if (tries++ < 12) setTimeout(attempt, 60);
+				};
+				setTimeout(attempt, 60);
+				return "pasted";
 			};
+
+			function composer() {
+				const box = document.querySelector('[role="textbox"][contenteditable="true"]')
+					|| document.querySelector('[role="textbox"]')
+					|| document.querySelector("textarea");
+				return box === null ? null : box;
+			}
+
+			function sendButton() {
+				const buttons = Array.prototype.slice.call(document.querySelectorAll("button"));
+				return buttons.find((button) => /发送|Send/i.test(button.getAttribute("aria-label") ?? "")) ?? null;
+			}
 		}
 
 		function AndroidSection(props) {
