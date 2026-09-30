@@ -123,3 +123,56 @@ git config core.createObject rename
 一是 profile 里的 `customSkillDirs` 用相对 profile 目录的 `require.resolve()` 指向上游预设包，
 而 profile 的 `node_modules` 里只有自己的插件 → 解析失败；二是裁剪脚本把 `*.md` 全删了，
 而技能正文就是 `SKILL.md`。两个都不报错，只是技能列表空着。
+
+## 12. Android 不让应用建硬链接，于是沙箱里的 apt/dpkg 是坏的
+
+**现象**（用户手机上的原话）：`apt install git` 报 `E: dpkg was interrupted, you must manually
+run 'dpkg --configure -a'`；照着跑，`dpkg --configure -a` 报
+
+```
+dpkg: error: error creating new backup file '/var/lib/dpkg/status-old': Permission denied
+```
+
+提示符是 `root@localhost`，所以第一反应是"权限不对" —— 不是。
+
+**定位**：
+
+- 这句话对得上 dpkg 源码 `lib/dpkg/atomic-file.c` 的 `atomic_file_backup()`：
+  ```c
+  if (unlink(name_old) && errno != ENOENT)
+      ohshite(_("error removing old backup file '%s'"), name_old);
+  if (link(file->name, name_old) && errno != ENOENT)
+      ohshite(_("error creating new backup file '%s'"), name_old);   /* ← 死在这里 */
+  ```
+  失败的是 `link(status, status-old)`，errno = EACCES。dpkg 每写一次数据库都要走这一步，
+  所以任何 `apt install` 都必然失败；失败后数据库停在半途，提示你 `--configure -a`，再失败 —— 死循环。
+- 报的是"创建"而不是"删除"：`unlink(status-old)` 那步要么成功要么 ENOENT（被容忍），
+  说明目录可写、新建普通文件也没问题，**被拒的只是"硬链接"这个操作**。
+- 根因和 §1 是同一个：Android 不给应用进程 `link` 权限。应用故意不传 PRoot 的
+  `--link2symlink`（它把 link() 变成指向临时对象的软链，会留下悬空文件），所以 guest 里的
+  `link()` 就是真系统调用，被平台拒掉 —— 诚实地失败，但 dpkg 吃不消。
+
+**修法**：`payload/opt/dsh/android/linkfix.c`，编译成 `liblinkfix.so`，由 rootfs 里的
+`/etc/ld.so.preload` 全局加载（guest 内每个动态链接的程序都会带上它）：
+
+| 拦截 | 行为 |
+|---|---|
+| `link` / `linkat` | 真系统调用优先；EACCES/EPERM 时退回复制：目标已存在则失败、保留权限位、源是软链就照抄软链 |
+| `chown` / `lchown` / `fchown` / `fchownat` | 沙箱内本来就是"root"的约定，内核不让应用把文件送给别的 uid → 直接报告成功 |
+| `stat` / `lstat` / `fstat` / `fstatat` | 复制不会让源 inode 的链接数上升，而 shadow 的 `do_lock_file()` 正是靠 `link()` 之后 `st_nlink == 2` 判断锁是否被占 → 对我们刚给过第二个名字的 inode 如实多报一个链接 |
+
+要点是**没有 libc 依赖**（只有原始系统调用 + 一个 `__errno_location`）：这东西 preload 进每个进程，
+少一个符号就少一种"整个沙箱起不来"的可能。
+
+**验证**：用 `LINKFIX_FORCE_COPY=1` 把"内核拒绝硬链接"强制成真（每次 link 都走复制路径），
+在 chroot 里对交付的那份 rootfs 跑通了：
+
+```
+apt-get update                                                        ✓
+apt-get install git curl python3 openssh-server sudo tmux htop less   ✓
+addgroup（openssh 的 postinst）                                        ✓ 建出 _ssh 组
+```
+
+**代价**：两个名字不再共享同一份 inode。包管理器、git、harness 的原子写只需要"第二个名字"
+和"目标已存在就失败"这两条语义，所以不受影响；真依赖共享 inode 的用法（把硬链接当引用计数
+或写时复制使）在沙箱里得不到。
