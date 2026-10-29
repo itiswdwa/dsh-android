@@ -8,14 +8,14 @@
     "page": "https://github.com/itiswdwa/dsh-android/releases/latest"
   },
   "terminal": {
-    "version": "2",
-    "full": "1.2.0-t2",
-    "tag": "t2",
-    "url": "https://github.com/itiswdwa/dsh-android/releases/download/t2/payload.zip",
-    "manifest": "https://github.com/itiswdwa/dsh-android/releases/download/t2/payload.manifest"
+    "version": "3",
+    "full": "1.2.1-t3",
+    "tag": "t3",
+    "url": "https://github.com/itiswdwa/dsh-android/releases/download/t3/payload.zip",
+    "manifest": "https://github.com/itiswdwa/dsh-android/releases/download/t3/payload.manifest"
   },
   "hot": {
-    "version": "1.2.0-t2-sp15",
+    "version": "1.2.1-t3-sp1",
     "url": "https://github.com/itiswdwa/dsh-android/releases/latest/download/dsh-hot.zip",
     "manifest": "https://raw.githubusercontent.com/itiswdwa/dsh-android/main/update.json"
   }
