@@ -1,7 +1,7 @@
 {
-  "app": "1.2.0",
-  "terminal": "2",
-  "sp": 15,
-  "version": "1.2.0-t2-sp15",
-  "hash": "6406cc6356d10fc4"
+  "app": "1.2.1",
+  "terminal": "3",
+  "sp": 1,
+  "version": "1.2.1-t3-sp1",
+  "hash": "5b97ccbf3f4c034a"
 }

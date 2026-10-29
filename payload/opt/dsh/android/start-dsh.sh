@@ -121,7 +121,96 @@ if ! cd "$DSH_INSTALL" 2>/dev/null; then
   ls -la "$DSH_INSTALL" 2>&1 | head -20
   exit 3
 fi
-exec "$NODE" --expose-internals \
-  "$DSH_INSTALL/node_modules/@deepseek-ai/dsh/lib/bin.js" web \
+
+# ------------------------------------------------------------ boot health gate
+#
+# dsh 0.2.1 no longer exits when a plugin fails to load. It prints
+#
+#     dsh: skipping profile bundle "…": <reason>
+#
+# and keeps serving a UI that is missing that plugin (a blank/black page is one
+# of the shapes that takes). The app only counts a failure when this process
+# exits *before* it announces the harness URL — a readiness resets the failure
+# counter — so a half-broken harness used to run forever and automatic recovery
+# mode was never entered.
+#
+# Hence the gate: the harness's ready line is withheld here, the shell page and
+# every client plugin bundle it lists are probed, and the boot log is checked
+# for skipped plugins. Only a healthy boot gets its URL announced to the app. A
+# broken one exits non-zero *without* ever announcing readiness, so three
+# consecutive failures make the app enter recovery mode by itself.
+#
+# Escape hatch: BOOT_HEALTH=off starts the harness exactly as before.
+BOOT_HEALTH="${BOOT_HEALTH:-on}"
+BOOT_HEALTH_TIMEOUT_MS="${BOOT_HEALTH_TIMEOUT_MS:-30000}"
+export BOOT_HEALTH_TIMEOUT_MS
+HARNESS_BIN="$DSH_INSTALL/node_modules/@deepseek-ai/dsh/lib/bin.js"
+boot_harness() {
+  "$NODE" --expose-internals "$HARNESS_BIN" web \
+    --no-open --host 127.0.0.1 --port "$DSH_PORT" \
+    --trusted-host "127.0.0.1:$DSH_PORT"
+}
+
+DSH_BOOT_LOG="$DSH_HOME/.dsh-boot.log"
+if ! : > "$DSH_BOOT_LOG" 2>/dev/null; then
+  DSH_BOOT_LOG="/tmp/.dsh-boot.log"
+  : > "$DSH_BOOT_LOG" 2>/dev/null || true
+fi
+DSH_BOOT_PIPE="$DSH_HOME/.dsh-boot.pipe"
+
+if [ "$BOOT_HEALTH" = "off" ]; then
+  echo "start-dsh: boot health gate disabled (BOOT_HEALTH=off)"
+  exec "$NODE" --expose-internals "$HARNESS_BIN" web \
+    --no-open --host 127.0.0.1 --port "$DSH_PORT" \
+    --trusted-host "127.0.0.1:$DSH_PORT"
+fi
+
+rm -f "$DSH_BOOT_PIPE"
+if ! mkfifo "$DSH_BOOT_PIPE" 2>/dev/null; then
+  echo "start-dsh: cannot create $DSH_BOOT_PIPE — starting without the boot health gate"
+  exec "$NODE" --expose-internals "$HARNESS_BIN" web \
+    --no-open --host 127.0.0.1 --port "$DSH_PORT" \
+    --trusted-host "127.0.0.1:$DSH_PORT"
+fi
+
+# Started inline, not through boot_harness(): a function call in the background
+# runs in a subshell, and $! would then be that subshell's pid — killing it would
+# leave the harness orphaned and still holding the port.
+"$NODE" --expose-internals "$HARNESS_BIN" web \
   --no-open --host 127.0.0.1 --port "$DSH_PORT" \
-  --trusted-host "127.0.0.1:$DSH_PORT"
+  --trusted-host "127.0.0.1:$DSH_PORT" > "$DSH_BOOT_PIPE" 2>&1 &
+HARNESS_PID=$!
+announced=""
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$DSH_BOOT_LOG" 2>/dev/null || true
+  if [ -z "$announced" ]; then
+    case "$line" in
+      *"http://127.0.0.1:"*"token="*)
+        url=$(printf '%s\n' "$line" | grep -oE 'http://127\.0\.0\.1:[0-9]+/\?token=[A-Za-z0-9_-]+' | head -n 1 || true)
+        if [ -n "$url" ]; then
+          if "$NODE" "$DSH_INSTALL/android/boot-health.mjs" "$url" "$DSH_BOOT_LOG"; then
+            announced=1
+            printf '%s\n' "$line"
+            continue
+          fi
+          echo "start-dsh: boot health gate: harness is up but BROKEN — readiness withheld"
+          echo "start-dsh: 连续 3 次启动失败后应用会自动进入恢复模式；启动日志：$DSH_BOOT_LOG"
+          kill "$HARNESS_PID" 2>/dev/null || true
+          for _ in 1 2 3 4 5; do
+            kill -0 "$HARNESS_PID" 2>/dev/null || break
+            sleep 1
+          done
+          kill -9 "$HARNESS_PID" 2>/dev/null || true
+          wait "$HARNESS_PID" 2>/dev/null || true
+          rm -f "$DSH_BOOT_PIPE"
+          exit 9
+        fi
+        ;;
+    esac
+  fi
+  printf '%s\n' "$line"
+done < "$DSH_BOOT_PIPE"
+code=0
+wait "$HARNESS_PID" || code=$?
+rm -f "$DSH_BOOT_PIPE"
+exit "$code"
