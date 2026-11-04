@@ -27,6 +27,13 @@ DeepSeek Harness 官方以 `npx @deepseek-ai/dsh web` 的形式在电脑上跑�
 - **导出文件到手机**：沙箱里的文件一键复制到手机 Download，文件预览页和设置页都有入口。
 - **操作手机本身**（可选，需要 [Shizuku](https://shizuku.rikka.app/)）：内置 `shiz` 命令，以 Android shell 身份执行 ——
   打开应用、看屏幕截图、调亮度、开关勿扰、读通知、装 APK……随附的 `phone-control` 技能会教 agent 怎么用。
+- **插件和 AI 可以调用 Android 接口**（需要 `1.2.2+`）：插件不用装第二只 App、不要 root，就能读设备信息、
+  读写剪贴板、发通知、调音量与亮度、切免打扰、列应用、分享、截屏、执行全局动作；18 个 `/android/*`
+  端点（含生物识别确认）之外，还有按对话授权的 AI 入口 —— 只有你勾选为「高危」的能力（默认
+  剪贴板 / 操作手机设置 / 截屏）第一次用于某个对话时才弹一次指纹/人脸确认（Android 10+ 已录入时可
+  回退锁屏密码），其余能力直接放行；确认过的授权只在这个对话里有效，高危集合与授权都可在
+  设置 → 安卓沙箱 → AI 授权 里调整/撤销；AI 还能管理 UI 里的终端标签页。契约见
+  [docs/ANDROID-API.md](docs/ANDROID-API.md)，AI 入口、授权与工具见 [docs/AI-API.md](docs/AI-API.md)。
 - **恢复模式**：harness 起不来时也能进沙箱 —— 连续几次启动失败后应用会自己切换到恢复模式，
   不加载 harness，直接起来一个 SSH 服务和一个 shell（密码是每次进入时新生成的令牌）。
   详见 [docs/RECOVERY.md](docs/RECOVERY.md)。

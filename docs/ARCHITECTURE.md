@@ -73,12 +73,28 @@ rootfs 里那份 `/root` 会被完全遮住，技能和指令只有写进 bind �
 | `POST /import` `/export` `/export/recent` | 导入 rootfs、导出文件到 Download |
 | `POST /mounts/*` | 增删挂载、SAF 选目录并解析成真实路径 |
 | `POST /shizuku/request\|exec` | Shizuku 授权与特权执行（`shiz` CLI 走这里） |
+| `GET/POST /android/*` | 给插件的 Android 能力面：设备信息、剪贴板、通知、音量、亮度/旋转、免打扰、应用、分享、截屏、全局动作、系统设置页；权限按项计（`WRITE_SETTINGS`、勿扰访问、无障碍、通知），缺授权返回 `needs` |
+| `GET/POST /android/biometric` | 生物识别状态与用户确认：系统 `BiometricPrompt`（Android 9+；已录入生物识别时 Android 10+ 可回退锁屏密码），同一时刻只弹一个、最多等 60 秒 |
+| `POST /ai/android` | AI 访问 Android 的统一入口：按 `path` 推导 6 类能力、按对话授权后转给 `AndroidApi`；截屏落盘 `Download/` 只回路径 |
+| `GET /ai/consent`、`POST /ai/consent/revoke` | 按 `sessionId` 记录能力授权（SharedPreferences 的 `ai.consent` 键）与撤销；设置页「AI 授权」读写它 |
+| `POST /ai/terminal/tabs` | AI 管理 UI 终端标签页：`list` 读缓存，`open/activate/close` 入队并等页面回报（≤4 秒） |
+| `GET /terminal/tabs/commands`、`POST /terminal/tabs/report` | 页面侧中继：客户端插件约每 900ms 轮询命令、回报标签页与执行结果（只靠桥令牌） |
 | `GET /recovery/status` | 恢复模式状态：是否启用、实时令牌、局域网地址、三套连接命令 |
 | `POST /recovery/start\|stop` | 进入/退出恢复模式（换 guest 入口脚本，因此要重启沙箱） |
 | `POST /recovery/token` | 换一个新令牌（密码在 guest 的 shadow 里，重启恢复模式后生效） |
 
 （表里只列了主要端点；`/ball/*`、`/a11y/*`、`/haptic`、`/hot/*`、`/snapshot` 的完整字段见
 `BridgeServer.java` 与 `plugin/` 的客户端。）
+
+`/android/*` 的完整契约（端点、`needs` 取值、权限提示）见 [ANDROID-API.md](ANDROID-API.md)；
+WebView 里注入的 `window.DshAndroid.version` 在 `1.2.2` 从 `1` 升到 `2` —— 插件应先判断
+`version >= 2` 再调用这组端点（`1` 只保证 `base`/`token`/`pty`）。
+
+`/android/biometric`、`/ai/*` 与 `/terminal/tabs/*` 的契约见 [AI-API.md](AI-API.md)。按对话授权存在
+应用 SharedPreferences 的 `ai.consent` 键里，按 `sessionId` + 能力记录授权时间：第一次用某个能力弹一次
+系统生物识别确认，通过后这个对话不再问、应用重启后仍有效，直到在 设置 → 安卓沙箱 → **AI 授权** 里
+撤销（可单项、整会话或全部撤销）。它只拦 AI 入口（`/ai/*`），直接拿桥令牌调 `/android/*` 的插件
+不受约束 —— 桥令牌本来就是能力边界，这一层是“AI 动手前你能看见、事后能收回”的确认与审计。
 
 界面里那些"设置"其实全在这个桥上：dsh 的 Web UI 是唯一的前端，原生控制台只在服务没起来时露脸。
 

@@ -28,6 +28,19 @@
          this is for the navigator.vibrate fallback when the page runs outside the app. -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 勿扰（DND）访问：这是 normal 级 marker 权限，不声明的话系统「勿扰访问」
+         列表里根本不会出现 DSH，/android/dnd 的写路径和 permissions 的 dnd 请求
+         都无法真正授权。 -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <!-- 插件接口（/android/*，见 docs/ANDROID-API.md）：
+         ACCESS_NETWORK_STATE 读网络类型；MODIFY_AUDIO_SETTINGS 调音量；
+         WRITE_SETTINGS 改亮度/自动亮度/旋转（特殊权限，用户在设置里授予，
+         不能运行时弹窗）；REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 只为把用户
+         送到「忽略电池优化」页面，接口本身不申请静默保活。 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Shizuku: the privileged Android channel. Declaring the API permission
          makes the app a Shizuku client, so the Web UI can offer (and the agent
          can use) the same shell the adb/Shizuku server already runs with,
@@ -41,6 +54,11 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- 悬浮球点一下就是语音输入 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 生物识别：/android/biometric 和「按对话授权」的确认走系统 BiometricPrompt。
+         USE_FINGERPRINT 是 Android 9- 的旧权限名，两个都声明才能覆盖 minSdk 26 到
+         新系统；运行时是否可用仍由 Biometric.status() 判定，不用权限做门禁。 -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
 
     <!-- CWE-312（PR #5 指出的那个）：API key 明文存在 SharedPreferences 里，而
          targetSdk 28 下 Auto Backup 默认开启 —— 系统备份会把 app 数据（含 prefs

@@ -15,12 +15,12 @@
 set -u
 
 # ---- 本版期望值：发布新版本时改这一段 --------------------------------------
-EXPECT_APP=1.2.1            # VERSION
-EXPECT_CODE=10214           # VERSION_CODE（不是公式：1.2.0 这条线原地重发过多版）
-EXPECT_PKG_HOT=1.2.1-t3-sp0 # APK 内建热包（build_apk.sh 用 --base，恒 sp0）
+EXPECT_APP=1.2.2            # VERSION
+EXPECT_CODE=10217           # VERSION_CODE（1.2.2 高危策略重发：10216 作废）
+EXPECT_PKG_HOT=1.2.2-t3-sp0 # APK 内建热包（build_apk.sh 用 --base，恒 sp0）
 # 这一版还没发过热包，所以"应用后应看到"就是内建那份；两者相同时下面的检查
 # 会把"什么都没应用"当作正确状态（而不是当成漏更新）。
-EXPECT_HOT=1.2.1-t3-sp0
+EXPECT_HOT=1.2.2-t3-sp0
 EXPECT_MARKET_MD5=d6bb2e46139ebbd3b217bc8efbd562bc   # @local/dsh-market/client.js
 EXPECT_PNPM=12.11.2
 EXPECT_PNPM_MD5=f20469f02b54169cc9ed50abb5b80b7f  # 载荷里那份二进制的 md5（解开软链后算）
@@ -247,6 +247,9 @@ if grep -q "android-sandbox" "$PROFILE/cordis.patch.yml" 2>/dev/null; then pass 
 # --- 汇总 --------------------------------------------------------------------
 printf '\n================ 汇总 ================\n'
 printf 'PASS=%s FAIL=%s MANUAL=%s SKIP=%s\n' "$PASS" "$FAIL" "$MANUAL" "$SKIP"
+printf '1.2.2 新增的插件 Android 接口（/android/*）另跑：\n'
+printf '  node docs/verify-android-api.mjs          # 只读\n'
+printf '  node docs/verify-android-api.mjs --full   # 含 toast/震动/通知/截屏等可见副作用\n'
 printf '失败/人工项请把本脚本的整段输出贴回来（脚本不会打印 bridge token，也没有改动设备）。\n'
 printf '注：本脚本只读；唯一会动手的是 --haptic（轻震一下）。\n'
 exit 0

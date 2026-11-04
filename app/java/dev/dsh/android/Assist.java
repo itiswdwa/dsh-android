@@ -4,11 +4,17 @@ import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import android.graphics.Path;
 import android.graphics.Rect;
+import android.hardware.HardwareBuffer;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Base64;
+import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
@@ -16,8 +22,12 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Screen control for the agent: an accessibility service, plus the small static
@@ -335,6 +345,184 @@ public final class Assist extends AccessibilityService {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         ctx.startActivity(intent);
         return "launched " + what;
+    }
+
+    // ---------------------------------------------------- plugin API surface
+
+    /** The window in front, for {@code GET /android/foreground}. */
+    public static JSONObject foreground() throws Exception {
+        Assist service = require();
+        JSONObject answer = new JSONObject();
+        AccessibilityNodeInfo root = service.getRootInActiveWindow();
+        if (root == null) {
+            answer.put("package", "");
+            answer.put("app", "");
+            answer.put("class", "");
+            answer.put("own", false);
+            return answer;
+        }
+        CharSequence packageName = root.getPackageName();
+        CharSequence className = root.getClassName();
+        String pkg = packageName == null ? "" : packageName.toString();
+        String label = "";
+        try {
+            PackageManager packages = service.getPackageManager();
+            ApplicationInfo info = packages.getApplicationInfo(pkg, 0);
+            label = String.valueOf(packages.getApplicationLabel(info));
+        } catch (Throwable ignored) {
+        }
+        answer.put("package", pkg);
+        answer.put("app", label);
+        answer.put("class", className == null ? "" : className.toString());
+        answer.put("own", pkg.equals(service.getPackageName()));
+        return answer;
+    }
+
+    /** One of the system-wide global actions, for {@code POST /android/global}. */
+    public static void globalAction(int action, String label) throws Exception {
+        if (!require().performGlobalAction(action)) {
+            throw new IllegalStateException("系统拒绝了「" + label + "」（锁屏或前台不是可操作窗口？）");
+        }
+    }
+
+    /**
+     * The accessibility service refused a screenshot, with the platform error
+     * code so AndroidApi can turn it into `needs`/`hint` instead of a generic
+     * failure. `code == 0` means a local failure (no bitmap, JPEG encode, timeout).
+     */
+    public static final class ScreenshotFailure extends Exception {
+        public final int code;
+
+        ScreenshotFailure(int code, String message) {
+            super(message);
+            this.code = code;
+        }
+    }
+
+    /**
+     * Screen capture through the accessibility service (API 30+).
+     *
+     * <p>The bitmap arrives on a binder callback and must be copied off its
+     * {@link HardwareBuffer} before that buffer is closed — the wrapper is only
+     * valid while the buffer is open. Everything after that is plain Bitmap
+     * work: scale into the caller's budget, JPEG, base64. The caller is usually a
+     * model, so the default size is deliberately modest. Both the capture and the
+     * scaled copy are recycled before returning so repeated screenshots do not
+     * pile up bitmaps.
+     */
+    public static JSONObject screenshot(final int quality, final int maxWidth, final int maxHeight)
+            throws Exception {
+        if (android.os.Build.VERSION.SDK_INT < 30) {
+            throw new ScreenshotFailure(0, "截屏需要 Android 11（API 30）及以上");
+        }
+        final Assist service = require();
+        final CountDownLatch latch = new CountDownLatch(1);
+        final Bitmap[] bitmap = new Bitmap[1];
+        final Throwable[] failure = new Throwable[1];
+        final long started = android.os.SystemClock.elapsedRealtime();
+        try {
+            service.takeScreenshot(Display.DEFAULT_DISPLAY, new Executor() {
+                @Override
+                public void execute(Runnable command) {
+                    MAIN.post(command);
+                }
+            }, new AccessibilityService.TakeScreenshotCallback() {
+                @Override
+                public void onSuccess(AccessibilityService.ScreenshotResult result) {
+                    HardwareBuffer buffer = null;
+                    Bitmap wrapped = null;
+                    try {
+                        buffer = result.getHardwareBuffer();
+                        wrapped = Bitmap.wrapHardwareBuffer(buffer, result.getColorSpace());
+                        if (wrapped != null) {
+                            bitmap[0] = wrapped.copy(Bitmap.Config.ARGB_8888, false);
+                        }
+                    } catch (Throwable error) {
+                        failure[0] = error;
+                    } finally {
+                        if (wrapped != null) wrapped.recycle();
+                        if (buffer != null) {
+                            try {
+                                buffer.close();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                        latch.countDown();
+                    }
+                }
+
+                @Override
+                public void onFailure(int errorCode) {
+                    failure[0] = new ScreenshotFailure(errorCode, screenshotError(errorCode));
+                    latch.countDown();
+                }
+            });
+        } catch (Throwable error) {
+            failure[0] = error;
+            latch.countDown();
+        }
+        if (!latch.await(5, TimeUnit.SECONDS)) {
+            throw new ScreenshotFailure(0, "截屏超时（前台是安全界面？）");
+        }
+        if (failure[0] != null) {
+            if (failure[0] instanceof ScreenshotFailure) throw (ScreenshotFailure) failure[0];
+            String message = failure[0].getMessage();
+            throw new ScreenshotFailure(0, message == null || message.trim().isEmpty()
+                    ? "截屏失败：" + failure[0].getClass().getSimpleName() : message);
+        }
+        Bitmap captured = bitmap[0];
+        if (captured == null) throw new ScreenshotFailure(0, "截屏没有返回图像");
+
+        Bitmap output = captured;
+        try {
+            float scale = Math.min(1f, Math.min(maxWidth / (float) captured.getWidth(),
+                    maxHeight / (float) captured.getHeight()));
+            if (scale < 1f) {
+                output = Bitmap.createScaledBitmap(captured,
+                        Math.max(1, Math.round(captured.getWidth() * scale)),
+                        Math.max(1, Math.round(captured.getHeight() * scale)), true);
+            }
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            if (!output.compress(Bitmap.CompressFormat.JPEG, quality, bytes)) {
+                throw new ScreenshotFailure(0, "JPEG 编码失败");
+            }
+            byte[] jpeg = bytes.toByteArray();
+            JSONObject answer = new JSONObject();
+            answer.put("mime", "image/jpeg");
+            answer.put("width", output.getWidth());
+            answer.put("height", output.getHeight());
+            answer.put("bytes", jpeg.length);
+            answer.put("tookMs", android.os.SystemClock.elapsedRealtime() - started);
+            answer.put("image", Base64.encodeToString(jpeg, Base64.NO_WRAP));
+            return answer;
+        } finally {
+            if (output != null && output != captured) {
+                try {
+                    output.recycle();
+                } catch (Throwable ignored) {
+                }
+            }
+            try {
+                captured.recycle();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private static String screenshotError(int code) {
+        switch (code) {
+            case AccessibilityService.ERROR_TAKE_SCREENSHOT_NO_ACCESSIBILITY_ACCESS:
+                return "无障碍服务没有截屏权限，请在「手机助手」里关闭再打开";
+            case AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT:
+                return "截屏太频繁了，请等一秒再试";
+            case AccessibilityService.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW:
+                return "前台是安全界面（密码/支付等），系统禁止截屏";
+            case AccessibilityService.ERROR_TAKE_SCREENSHOT_INVALID_DISPLAY:
+            case AccessibilityService.ERROR_TAKE_SCREENSHOT_INVALID_WINDOW:
+                return "截屏失败：系统显示或窗口状态异常，请重试";
+            default:
+                return "系统拒绝截屏（错误码 " + code + "）";
+        }
     }
 
     // --------------------------------------------------------------- handover

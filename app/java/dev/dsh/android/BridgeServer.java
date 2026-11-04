@@ -88,13 +88,49 @@ public final class BridgeServer {
          */
         default void onHapticTap() {
         }
+
+        /**
+         * A phone capability the plugin API needs the user to grant (see
+         * {@code /android/permissions}). Only the grants the activity must own are
+         * routed here — system-settings pages are opened by {@link AndroidApi}
+         * directly. Defaulted so an older host implementation still compiles.
+         */
+        default void onAndroidPermission(String target) {
+        }
+
+        /** Keep the DSH window awake for {@code POST /android/display {"keepOn":true}}. */
+        default void onScreenKeepOn(boolean on) {
+        }
+
+        /**
+         * Show the system BiometricPrompt for {@code GET/POST /android/biometric}
+         * and the per-conversation consent behind {@code /ai/android}. The
+         * activity owns the dialog; the bridge thread blocks until the callback
+         * fires (at most 60 s, enforced by {@link Biometric}).
+         *
+         * <p>Defaulted to an immediate failure so an older host still compiles and
+         * a bridge request can never hang waiting for a dialog nobody can show.
+         */
+        default void onBiometric(String title, String subtitle, String description,
+                BiometricCallback callback) {
+            if (callback != null) callback.onResult(false, "当前宿主不支持生物识别确认");
+        }
+    }
+
+    /**
+     * Completion of one biometric prompt. The activity calls this exactly once;
+     * `error` is already user-readable Chinese when authentication did not
+     * succeed.
+     */
+    public interface BiometricCallback {
+        void onResult(boolean authenticated, String error);
     }
 
     private static ServerSocket server;
     private static Thread thread;
     private static volatile boolean running;
     private static String token = "";
-    private static Host host;
+    private static volatile Host host;
 
     private BridgeServer() {
     }
@@ -142,6 +178,16 @@ public final class BridgeServer {
             }
             server = null;
         }
+    }
+
+    /**
+     * Drop the activity callback when its owner is destroyed. Only clears it when
+     * {@code callback} is still the registered host, so an activity that was
+     * recreated (and already re-registered) is not unregistered by the old
+     * instance's teardown.
+     */
+    public static synchronized void releaseHost(Host callback) {
+        if (host == callback) host = null;
     }
 
     // ------------------------------------------------------------------ request
@@ -198,10 +244,12 @@ public final class BridgeServer {
 
     private static void route(OutputStream out, String method, String path, String body) throws IOException {
         JSONObject request = new JSONObject();
+        boolean invalidBody = false;
         if (!body.isEmpty()) {
             try {
                 request = new JSONObject(body);
             } catch (Throwable ignored) {
+                invalidBody = true;
             }
         }
         String query = "";
@@ -212,7 +260,15 @@ public final class BridgeServer {
         }
 
         try {
-            handle(path, request, out, host);
+            // The plugin/AI surface promises a JSON error for every failure. An
+            // unparsable body used to become an empty object, which made POST
+            // /android/clipboard look like a successful "clear the clipboard" and
+            // POST /android/display look like a no-op.
+            if (invalidBody && isJsonSurface(path)) {
+                respondJson(out, 200, error("请求体不是合法 JSON"));
+                return;
+            }
+            handle(path, query, request, out, host, method);
         } catch (Throwable error) {
             // Assist throws IllegalStateException for every "the user has not
             // enabled this yet" case; the message is already written for them.
@@ -221,6 +277,12 @@ public final class BridgeServer {
             } catch (Exception ignored) {
             }
         }
+    }
+
+    /** Paths whose contract says every failure is `{ok:false,error,...}`. */
+    private static boolean isJsonSurface(String path) {
+        return path.equals("/android") || path.startsWith("/android/")
+                || path.startsWith("/ai/") || path.startsWith("/terminal/tabs/");
     }
 
     /**
@@ -242,8 +304,31 @@ public final class BridgeServer {
         return metrics.widthPixels + "x" + metrics.heightPixels;
     }
 
-    private static void handle(String path, JSONObject request, OutputStream out, Host host)
-            throws Exception {
+    private static void handle(String path, String query, JSONObject request, OutputStream out, Host host,
+            String method) throws Exception {
+        // Biometric is its own thing: GET is a status probe, POST shows the system
+        // prompt. It therefore sits in front of the generic /android dispatch.
+        if (path.equals("/android/biometric")) {
+            respondJson(out, 200, Biometric.handle(method, request, host));
+            return;
+        }
+        // The AI surface (docs/AI-API.md) wraps the Android endpoints with
+        // per-conversation consent, and relays UI terminal tabs.
+        if (path.startsWith("/ai/")) {
+            respondJson(out, 200, AiApi.handle(method, path, query, request, host));
+            return;
+        }
+        if (path.startsWith("/terminal/tabs/")) {
+            respondJson(out, 200, TerminalTabs.handle(method, path, request));
+            return;
+        }
+        // The plugin-facing Android surface (docs/ANDROID-API.md). It owns its own
+        // error shape (`{ok:false,error,hint,needs}`) and never throws for a missing
+        // grant, so it gets first refusal before the app's own switch.
+        if (path.equals("/android") || path.startsWith("/android/")) {
+            respondJson(out, 200, AndroidApi.handle(path, query, request, host));
+            return;
+        }
         switch (path) {
             case "/snapshot":
                 respondJson(out, 200, snapshot());

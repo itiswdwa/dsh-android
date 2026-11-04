@@ -27,6 +27,39 @@ window.__ModuleLoader__.load({
 			nav: "沙箱设置",
 			navBall: "悬浮球",
 			navVersion: "版本更新",
+			navAi: "AI 授权",
+			aiTitle: "AI 授权",
+			aiIntro: "只有你勾选为「高危」的能力才需要按对话确认：第一次用于某个对话时要求指纹或人脸确认一次，之后同一个对话不再询问；未勾选的能力直接放行。判定规则与撤销都在这一页。",
+			aiRiskTitle: "高危能力（需要指纹/人脸确认）",
+			aiRiskIntro: "勾选的能力第一次用于某个对话时会要求确认；未勾选的直接放行。这里改的是判定规则，已产生的授权在下方撤销。",
+			aiRiskSaved: "已保存",
+			aiRiskFailed: "保存失败：{error}",
+			aiRiskUnsupported: "当前应用版本较旧：所有能力都会按对话确认；更新应用后才能自定义高危集合",
+			aiPrivacy: "这一页会列出对话标题，只保存在这台手机上、仅本机可见。",
+			aiSessions: "已授权的对话",
+			aiEmpty: "还没有高危授权记录",
+			aiUnknownSession: "（未命名对话）",
+			aiUpdated: "最近使用：{time}",
+			aiSessionId: "会话 ID",
+			aiGrantedAt: "授权于 {time}",
+			aiRevoke: "撤销",
+			aiRevokeSession: "撤销这个对话",
+			aiRevokeAll: "撤销全部",
+			aiRevokeAllConfirm: "确认撤销全部",
+			aiCancel: "取消",
+			aiRevoked: "已撤销 {count} 项",
+			aiRevokeFailed: "撤销失败：{error}",
+			aiLoadFailed: "读取授权失败：{error}",
+			aiUnavailable: "如果一直失败，可能是应用还不是 1.2.2，或这个页面不在 DSH 应用里。",
+			aiRefresh: "刷新",
+			aiNoCapabilities: "这个对话还没有授权任何能力。",
+			aiAllNote: "撤销全部会清空所有对话的授权记录；高危能力下次首次调用时会重新确认。",
+			aiCap_read: "读取设备与状态",
+			aiCap_clipboard: "剪贴板",
+			aiCap_notify: "提示与通知",
+			aiCap_control: "操作手机设置",
+			aiCap_screenshot: "截屏",
+			aiCap_terminal: "终端标签页",
 			ballTitle: "悬浮球外观",
 			ballRunning: "运行中",
 			ballStopped: "已关闭",
@@ -220,6 +253,39 @@ window.__ModuleLoader__.load({
 			nav: "Sandbox",
 			navBall: "Floating ball",
 			navVersion: "Version and updates",
+			navAi: "AI permissions",
+			aiTitle: "AI permissions",
+			aiIntro: "Only the capabilities you mark as high risk need a per-conversation confirmation: the first use in a conversation asks for a fingerprint or face confirmation, and that conversation is not asked again; unchecked capabilities pass directly. The rule and the revokes both live on this page.",
+			aiRiskTitle: "High-risk capabilities (fingerprint/face confirmation)",
+			aiRiskIntro: "A checked capability asks for confirmation the first time it is used in a conversation; unchecked ones are allowed directly. This changes the rule; existing grants are revoked below.",
+			aiRiskSaved: "Saved",
+			aiRiskFailed: "Could not save: {error}",
+			aiRiskUnsupported: "This app version is older: every capability asks for confirmation per conversation. Update the app to customize the high-risk set.",
+			aiPrivacy: "This page lists conversation titles; they are kept only on this phone and visible only to you.",
+			aiSessions: "Conversations with permissions",
+			aiEmpty: "No high-risk grants yet.",
+			aiUnknownSession: "(untitled conversation)",
+			aiUpdated: "Last used: {time}",
+			aiSessionId: "Session ID",
+			aiGrantedAt: "Granted {time}",
+			aiRevoke: "Revoke",
+			aiRevokeSession: "Revoke this conversation",
+			aiRevokeAll: "Revoke all",
+			aiRevokeAllConfirm: "Confirm revoke all",
+			aiCancel: "Cancel",
+			aiRevoked: "Revoked {count}",
+			aiRevokeFailed: "Revoke failed: {error}",
+			aiLoadFailed: "Could not read permissions: {error}",
+			aiUnavailable: "If this keeps failing, the app may predate 1.2.2, or this page is not inside the DSH app.",
+			aiRefresh: "Refresh",
+			aiNoCapabilities: "No capability is granted to this conversation yet.",
+			aiAllNote: "Revoke all clears every conversation's grants; high-risk capabilities ask again the next time they are used.",
+			aiCap_read: "Device and status",
+			aiCap_clipboard: "Clipboard",
+			aiCap_notify: "Toasts and notifications",
+			aiCap_control: "Phone settings",
+			aiCap_screenshot: "Screenshots",
+			aiCap_terminal: "Terminal tabs",
 			ballTitle: "Floating ball appearance",
 			ballRunning: "Running",
 			ballStopped: "Off",
@@ -449,13 +515,16 @@ window.__ModuleLoader__.load({
 		}
 
 		function fallbackSwitch(props) {
+			const disabled = props.disabled === true;
 			return h("button", {
 				type: "button",
 				role: "switch",
 				"aria-checked": props.checked === true,
 				"aria-label": props.label,
+				"aria-disabled": disabled ? "true" : "false",
+				disabled,
 				className: "dsa-plainSwitch",
-				onClick: () => props.onChange(!props.checked)
+				onClick: disabled || typeof props.onChange !== "function" ? undefined : () => props.onChange(!props.checked)
 			}, h("span", { className: "dsa-plainThumb" }));
 		}
 
@@ -532,6 +601,7 @@ window.__ModuleLoader__.load({
 .dsa-input[type=password]{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .dsa-pre{margin:0;padding:10px 12px;border:0.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);max-height:240px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:17px;color:var(--dsw-alias-label-secondary);white-space:pre-wrap;overflow-wrap:anywhere}
 .dsa-toggle{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0}
+.dsa-toggle[data-disabled=true]{opacity:.55}
 .dsa-item{display:flex;flex-direction:column;gap:8px;min-width:0}
 .dsa-item + .dsa-item{border-top:0.5px solid var(--dsw-alias-border-l2);padding-top:10px}
 .dsa-ellipsis{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
@@ -625,16 +695,76 @@ html[data-ds-dark-theme] .dsa-root{--dsa-ball-fill:#3B5BFF}
 			return api && api.base ? api : null;
 		}
 
-		async function call(path, body) {
+		/**
+		 * Every bridge call is bounded.
+		 *
+		 * The app shares this phone, but a frozen or wedged UI thread can leave
+		 * a request hanging forever — and the terminal relay polls every 900ms,
+		 * so one stuck request would stall it for good. 5s is far above a healthy
+		 * loopback round-trip and far below "hang".
+		 */
+		const BRIDGE_CALL_TIMEOUT_MS = 5000;
+
+		/**
+		 * One abort deadline for a call; a non-positive `timeoutMs` means none.
+		 *
+		 * Returns the signal plus a cleanup for the fallback timer: a pending
+		 * `setTimeout` would otherwise abort a signal long after its call finished,
+		 * keeping a timer (and the page) busy for no reason.
+		 */
+		function bridgeCallSignal(timeoutMs) {
+			const idle = { signal: undefined, cleanup() {} };
+			if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0) return idle;
+			try {
+				if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+					return { signal: AbortSignal.timeout(timeoutMs), cleanup() {} };
+				}
+			} catch (error) {
+				/* older WebView: fall through to the controller */
+			}
+			if (typeof AbortController !== "function") return idle;
+			const controller = new AbortController();
+			const timer = setTimeout(() => controller.abort(), timeoutMs);
+			return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
+		}
+
+		/**
+		 * One authenticated bridge call.
+		 *
+		 * `options.timeoutMs` overrides the 5s default for the few endpoints that
+		 * do real work server-side (Proot, downloads, file copies); everything
+		 * else — above all the terminal relay's poll — must give up instead of
+		 * waiting for an app that stopped answering.
+		 */
+		async function call(path, body, options) {
 			const api = bridge();
 			if (api === null) throw new Error("no bridge");
-			const response = await fetch(api.base + path, {
-				method: body === undefined ? "GET" : "POST",
-				headers: Object.assign({ "X-Dsh-Token": api.token ?? "" },
-					body === undefined ? null : { "Content-Type": "application/json" }),
-				body: body === undefined ? undefined : JSON.stringify(body)
-			});
-			const text = await response.text();
+			const timeoutMs = options !== null && typeof options === "object" && typeof options.timeoutMs === "number"
+				? options.timeoutMs
+				: BRIDGE_CALL_TIMEOUT_MS;
+			const deadline = bridgeCallSignal(timeoutMs);
+			let response;
+			let text;
+			try {
+				response = await fetch(api.base + path, {
+					method: body === undefined ? "GET" : "POST",
+					headers: Object.assign({ "X-Dsh-Token": api.token ?? "" },
+						body === undefined ? null : { "Content-Type": "application/json" }),
+					body: body === undefined ? undefined : JSON.stringify(body),
+					signal: deadline.signal
+				});
+				text = await response.text();
+			} catch (error) {
+				// AbortSignal.timeout aborts with "TimeoutError"; our own controller
+				// aborts with "AbortError". A frozen app is the same failure either way.
+				const name = error !== null && typeof error === "object" ? error.name : "";
+				if (name === "AbortError" || name === "TimeoutError") {
+					throw new Error("控制桥 " + Math.round(timeoutMs / 1000) + " 秒没有响应（" + path + "）");
+				}
+				throw error;
+			} finally {
+				deadline.cleanup();
+			}
 			let data;
 			try {
 				data = text ? JSON.parse(text) : {};
@@ -678,11 +808,18 @@ html[data-ds-dark-theme] .dsa-root{--dsa-ball-fill:#3B5BFF}
 
 		/** Title + description on the left, one control on the right (the General rows). */
 		function ToggleRow(props) {
-			return h("div", { className: "dsa-toggle" },
+			const disabled = props.disabled === true;
+			return h("div", { className: "dsa-toggle", "data-disabled": disabled ? "true" : "false" },
 				h("div", { className: "dsa-copy" },
 					h("span", { className: "dsa-title" }, props.title),
 					props.desc === undefined ? null : h("span", { className: "dsa-hint" }, props.desc)),
-				h(Switch, { checked: props.checked === true, onChange: props.onChange, label: props.title }));
+				h(Switch, {
+					checked: props.checked === true,
+					onChange: disabled ? undefined : props.onChange,
+					label: props.title,
+					disabled,
+					"aria-disabled": disabled ? "true" : "false"
+				}));
 		}
 
 		/**
@@ -980,7 +1117,7 @@ html[data-ds-dark-theme] .dsa-root{--dsa-ball-fill:#3B5BFF}
 										onClick: async () => {
 											setMessage(t("busy"));
 											try {
-												const result = await call("/mounts/test", { id: mount.id });
+												const result = await call("/mounts/test", { id: mount.id }, { timeoutMs: 45000 });
 												setMessage("");
 												setOutput("$ ls -la " + mount.guest + "\n" + (result.output ?? "")
 													+ (result.problem ? "\n⚠ " + result.problem : ""));
@@ -1054,7 +1191,7 @@ html[data-ds-dark-theme] .dsa-root{--dsa-ball-fill:#3B5BFF}
 				}
 				setMessage(t("busy"));
 				try {
-					const data = await call("/export", { path: target });
+					const data = await call("/export", { path: target }, { timeoutMs: 180000 });
 					setMessage(data.message ?? data.error ?? "");
 				} catch (error) {
 					setMessage(String(error.message ?? error));
@@ -1114,7 +1251,7 @@ html[data-ds-dark-theme] .dsa-root{--dsa-ball-fill:#3B5BFF}
 				}
 				setMessage(t("busy"));
 				try {
-					const data = await call("/export", { path });
+					const data = await call("/export", { path }, { timeoutMs: 180000 });
 					setMessage(data.ok === true ? "→ Download/" + data.name : (data.error ?? ""));
 				} catch (error) {
 					setMessage(String(error.message ?? error));
@@ -1142,7 +1279,7 @@ html[data-ds-dark-theme] .dsa-root{--dsa-ball-fill:#3B5BFF}
 				setState("checking");
 				setMessage("");
 				try {
-					const data = await call("/update/check", {});
+					const data = await call("/update/check", {}, { timeoutMs: 30000 });
 					if (data.ok !== true) throw new Error(data.error ?? t("failed"));
 					setInfo(data);
 					setState("done");
@@ -1210,7 +1347,7 @@ html[data-ds-dark-theme] .dsa-root{--dsa-ball-fill:#3B5BFF}
 										onClick: async () => {
 											setMessage(t("busy"));
 											try {
-												const result = await call("/hot/fetch", { url: info.hot.url });
+												const result = await call("/hot/fetch", { url: info.hot.url }, { timeoutMs: 120000 });
 												setMessage(result.message ?? result.error ?? "");
 											} catch (error) {
 												setMessage(String(error.message ?? error));
@@ -1311,7 +1448,7 @@ html[data-ds-dark-theme] .dsa-root{--dsa-ball-fill:#3B5BFF}
 								disabled: shizuku.granted !== true,
 								onClick: async () => {
 									try {
-										const result = await call("/shizuku/exec", { command });
+										const result = await call("/shizuku/exec", { command }, { timeoutMs: 30000 });
 										setOutput("exit " + result.exit + "\n" + (result.stdout ?? "") + (result.stderr ?? ""));
 									} catch (error) {
 										setOutput(String(error.message ?? error));
@@ -2336,7 +2473,7 @@ html[data-ds-dark-theme] .dsa-root{--dsa-ball-fill:#3B5BFF}
 							await reload();
 						},
 						onDelete: async (id) => {
-							await call("/distros/delete", { id });
+							await call("/distros/delete", { id }, { timeoutMs: 30000 });
 							await reload();
 						},
 						onCommand: async (id, command) => {
@@ -2386,6 +2523,271 @@ html[data-ds-dark-theme] .dsa-root{--dsa-ball-fill:#3B5BFF}
 			const children = react.Children.toArray(view.props.children);
 			return react.cloneElement(view, null,
 				(SECTIONS[part] ?? SECTIONS.sandbox).map((index) => children[index]));
+		}
+
+		/* ------------------------------------------------------------------
+		 * AI permissions (one card per conversation)
+		 * ----------------------------------------------------------------
+		 * The grants live in the app (`ai.consent`, keyed by the session id the
+		 * tool call ran in); this page only lists and revokes them. The list is
+		 * polled because the app has no client channel for it, and because the
+		 * only writer a user needs from here is a revoke.
+		 * ---------------------------------------------------------------- */
+
+		const AI_CAPABILITY_LABELS = {
+			read: "aiCap_read",
+			clipboard: "aiCap_clipboard",
+			notify: "aiCap_notify",
+			control: "aiCap_control",
+			screenshot: "aiCap_screenshot",
+			terminal: "aiCap_terminal"
+		};
+
+		function aiCapabilityLabel(t, capability) {
+			const key = AI_CAPABILITY_LABELS[capability];
+			return key === undefined ? String(capability) : t(key);
+		}
+
+		/** The six capabilities, in the app's own order. */
+		const AI_CAPABILITIES = ["read", "clipboard", "notify", "control", "screenshot", "terminal"];
+
+
+		/** One grant timestamp; empty when the app sent none. */
+		function aiTime(ms) {
+			if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return "";
+			try {
+				return new Date(ms).toLocaleString();
+			} catch (error) {
+				return String(ms);
+			}
+		}
+
+		function AiConsentSection(props) {
+			const t = props.t;
+			const [snapshot, setSnapshot] = react.useState(null);
+			const [error, setError] = react.useState(null);
+			const [message, setMessage] = react.useState("");
+			const [working, setWorking] = react.useState(false);
+			const [confirmAll, setConfirmAll] = react.useState(false);
+			const [riskBusy, setRiskBusy] = react.useState(false);
+			const [riskMessage, setRiskMessage] = react.useState("");
+			const riskBusyRef = react.useRef(false);
+			const tick = usePolling(4000);
+
+			/** Load once, then on every poll tick; keep the old list on failure. */
+			const reload = async () => {
+				try {
+					const next = await call("/ai/consent");
+					setSnapshot(next);
+					setError(null);
+				} catch (failure) {
+					setError(String(failure.message ?? failure));
+				}
+			};
+
+			react.useEffect(() => {
+				if (bridge() === null) return undefined;
+				let cancelled = false;
+				call("/ai/consent")
+					.then((next) => {
+						if (cancelled) return;
+						setSnapshot(next);
+						setError(null);
+					})
+					.catch((failure) => {
+						if (!cancelled) setError(String(failure.message ?? failure));
+					});
+				return () => {
+					cancelled = true;
+				};
+			}, [tick]);
+
+			/** One page chrome for every state, so a slow bridge still looks like the shell. */
+			const shell = (body) => h("div", { className: "dsa-root" },
+				h("h2", { className: "dsa-heading" }, t("aiTitle")),
+				h("p", { className: "dsa-intro" }, t("aiIntro")),
+				body);
+
+			if (bridge() === null) return shell(h("p", { className: "dsa-hint" }, t("noBridge")));
+			if (snapshot === null) {
+				return shell(h("p", { className: error === null ? "dsa-hint" : "dsa-error" },
+					error === null ? t("busy") : t("aiLoadFailed", { error })));
+			}
+			if (snapshot.ok === false) {
+				const detail = typeof snapshot.error === "string" ? snapshot.error : t("busy");
+				return shell(h("p", { className: "dsa-error" }, t("aiLoadFailed", { error: detail })));
+			}
+
+			const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
+			// Which capabilities currently need a confirmation. `risk` is the
+			// app's stored choice; the fallback keeps an app that predates the
+			// field on the documented defaults instead of showing everything off.
+			const riskSupported = Array.isArray(snapshot.risk);
+			// An app that predates `risk` (10216) prompts for every capability.
+			// Show that truth — all six on and locked — instead of the 10217
+			// defaults, which would describe the opposite rule.
+			const risk = new Set((riskSupported ? snapshot.risk : AI_CAPABILITIES)
+				.filter((capability) => AI_CAPABILITIES.indexOf(capability) !== -1));
+
+			/** Save the high-risk set; the app prunes grants that stop being risky. */
+			const toggleRisk = async (capability, enabled) => {
+				// A ref, not the state: two taps can land in the same frame and both
+				// read `riskBusy === false` before React commits, so the second save
+				// would overwrite the first with a set computed from the same roster.
+				// A refused tap is better than a silently lost capability.
+				if (riskBusyRef.current || !riskSupported) return;
+				const next = new Set(risk);
+				if (enabled === true) next.add(capability);
+				else next.delete(capability);
+				const capabilities = AI_CAPABILITIES.filter((item) => next.has(item));
+				riskBusyRef.current = true;
+				setRiskBusy(true);
+				setRiskMessage(t("busy"));
+				try {
+					const answer = await call("/ai/consent/risk", { capabilities });
+					if (answer.ok === false) {
+						throw new Error(typeof answer.error === "string" && answer.error !== "" ? answer.error : t("busy"));
+					}
+					setRiskMessage(typeof answer.message === "string" && answer.message !== "" ? answer.message : t("aiRiskSaved"));
+					await reload();
+				} catch (failure) {
+					setRiskMessage(t("aiRiskFailed", { error: String(failure.message ?? failure) }));
+					// Re-read the app's truth: a rejected save must not leave a switch
+					// showing a value the app never accepted.
+					await reload();
+				} finally {
+					riskBusyRef.current = false;
+					setRiskBusy(false);
+				}
+			};
+
+			/** Revoke one capability, one conversation, or everything, then reload. */
+			const revoke = async (body) => {
+				if (working) return;
+				setWorking(true);
+				setConfirmAll(false);
+				setMessage(t("busy"));
+				try {
+					const answer = await call("/ai/consent/revoke", body);
+					if (answer.ok === false) {
+						throw new Error(typeof answer.error === "string" && answer.error !== "" ? answer.error : t("busy"));
+					}
+					const count = typeof answer.revoked === "number" ? String(answer.revoked) : "0";
+					setMessage(typeof answer.message === "string" && answer.message !== ""
+						? answer.message
+						: t("aiRevoked", { count }));
+					await reload();
+				} catch (failure) {
+					setMessage(t("aiRevokeFailed", { error: String(failure.message ?? failure) }));
+				} finally {
+					setWorking(false);
+				}
+			};
+
+			const sessionCard = (entry, index) => {
+				const session = entry !== null && typeof entry === "object" && typeof entry.session === "string"
+					? entry.session
+					: "";
+				const declaredTitle = entry !== null && typeof entry === "object"
+					&& typeof entry.title === "string" && entry.title.trim() !== ""
+					? entry.title.trim()
+					: "";
+				// The app usually has the conversation title; when it does not, the
+				// first 8 characters of the id are what the user can match against the
+				// session list — a full UUID is unreadable on a phone.
+				const title = declaredTitle !== ""
+					? declaredTitle
+					: session === "" ? t("aiUnknownSession") : session.slice(0, 8);
+				const updated = aiTime(entry === null || typeof entry !== "object" ? undefined : entry.updatedMs);
+				const grants = entry !== null && typeof entry === "object" && Array.isArray(entry.grants)
+					? entry.grants.filter((grant) => grant !== null && typeof grant === "object")
+					: [];
+				return h("li", { key: session === "" ? "session-" + index : session },
+					h(Card, null,
+						h("div", { className: "dsa-spread" },
+							h("div", { className: "dsa-copy" },
+								h("span", { className: "dsa-strong" }, title),
+								session === ""
+									? null
+									: h("span", { className: "dsa-meta dsa-mono" }, t("aiSessionId") + " · " + session)),
+							session === ""
+								? null
+								: h("div", { className: "dsa-actions" },
+									h(Button, {
+										variant: "ghost",
+										size: "sm",
+										"aria-disabled": working ? "true" : "false",
+										onClick: () => revoke({ session })
+									}, t("aiRevokeSession")))),
+						updated === "" ? null : h("p", { className: "dsa-hint" }, t("aiUpdated", { time: updated })),
+						h("hr", { className: "dsa-sep" }),
+						grants.length === 0
+							? h("p", { className: "dsa-hint" }, t("aiNoCapabilities"))
+							: h("ul", { className: "dsa-list" }, grants.map((grant) => {
+								const capability = typeof grant.capability === "string" ? grant.capability : "";
+								const granted = aiTime(grant.grantedMs);
+								return h("li", { key: capability === "" ? "grant" : capability },
+									h("div", { className: "dsa-spread" },
+										h("div", { className: "dsa-inline" },
+											h(Tag, null, aiCapabilityLabel(t, capability)),
+											granted === "" ? null : h("span", { className: "dsa-hint" }, t("aiGrantedAt", { time: granted }))),
+										capability === "" || session === ""
+											? null
+											: h(Button, {
+												variant: "ghost",
+												size: "sm",
+												"aria-disabled": working ? "true" : "false",
+												onClick: () => revoke({ session, capability })
+											}, t("aiRevoke"))));
+							}))));
+			};
+
+			const riskCard = h(Group, { title: t("aiRiskTitle") },
+				h(Card, null,
+					h("p", { className: "dsa-hint" }, t("aiRiskIntro")),
+					AI_CAPABILITIES.map((capability) => h(ToggleRow, {
+						key: capability,
+						title: aiCapabilityLabel(t, capability),
+						checked: risk.has(capability),
+						disabled: !riskSupported || riskBusy,
+						onChange: (value) => toggleRisk(capability, value)
+					})),
+					riskSupported ? null : h("p", { className: "dsa-hint" }, t("aiRiskUnsupported")),
+					riskMessage === "" ? null : h("p", { className: "dsa-hint" }, riskMessage)));
+
+			const sessionsCard = h(Group, { title: t("aiSessions") },
+				sessions.length === 0
+					? h("p", { className: "dsa-hint" }, t("aiEmpty"))
+					: h("ul", { className: "dsa-list" }, sessions.map(sessionCard)),
+				h("div", { className: "dsa-actions" },
+					h(Button, { variant: "outline", size: "sm", onClick: () => reload() }, t("aiRefresh")),
+					confirmAll
+						? h(Button, {
+							variant: "ghost",
+							size: "sm",
+							"aria-disabled": working ? "true" : "false",
+							onClick: () => revoke({ all: true })
+						}, t("aiRevokeAllConfirm"))
+						: h(Button, {
+							variant: "ghost",
+							size: "sm",
+							"aria-disabled": sessions.length === 0 || working ? "true" : "false",
+							onClick: () => {
+								if (working || sessions.length === 0) return;
+								setMessage("");
+								setConfirmAll(true);
+							}
+						}, t("aiRevokeAll")),
+					confirmAll
+						? h(Button, { variant: "ghost", size: "sm", onClick: () => setConfirmAll(false) }, t("aiCancel"))
+						: null),
+				sessions.length === 0 ? null : h("p", { className: "dsa-hint" }, t("aiAllNote")),
+				h("p", { className: "dsa-hint" }, t("aiPrivacy")),
+				h("p", { className: "dsa-hint" }, t("aiUnavailable")),
+				error === null ? null : h("p", { className: "dsa-error" }, t("aiLoadFailed", { error })),
+				message === "" ? null : h("p", { className: "dsa-hint" }, message));
+
+			return shell(h("div", null, riskCard, sessionsCard));
 		}
 
 		/* ==== @vt-haptic:begin — light tap feedback for the on-screen key row. Tested by test/vt-haptic.test.mjs ==== */
@@ -5110,6 +5512,11 @@ html[data-ds-dark-theme] .dsa-root{--dsa-ball-fill:#3B5BFF}
 		 * attributes the layout writes, and a value the app already has is not resent.
 		 */
 		function installThemeReport() {
+			// The bundle is also loaded by its own test harness (and could be
+			// loaded by an SSR shell) where there is no DOM at all. There is no
+			// window chrome to paint there either, so the reporter is simply not
+			// installed instead of taking apply() down with a ReferenceError.
+			if (typeof MutationObserver !== "function" || typeof document === "undefined") return { disconnect() {} };
 			let sent = null;
 			let failures = 0;
 			let bodyObserver = null;
@@ -5158,6 +5565,180 @@ html[data-ds-dark-theme] .dsa-root{--dsa-ball-fill:#3B5BFF}
 				}
 			};
 		}
+
+		/* ==== @terminal-tabs:begin — the AI's relay into the tab store. ==== */
+		/**
+		 * The app cannot touch the terminal tabs: they are state inside this
+		 * bundle's store. So the app queues commands (`GET
+		 * /terminal/tabs/commands`) and this relay executes them against the
+		 * store, then reports the roster back (`POST /terminal/tabs/report`).
+		 * Only `open`/`activate`/`close` are page commands: `list` is answered by
+		 * the app from its cached last report, so it never reaches this loop.
+		 *
+		 * The report is not just bookkeeping: it carries one `results` entry per
+		 * command id, and the app wakes the waiting `/ai/terminal/tabs` call with
+		 * it. A command that is received but never reported leaves the AI call
+		 * hanging until the app's own timeout, which is why results are sent
+		 * immediately while roster-only updates are throttled.
+		 *
+		 * Polling continues while the page is hidden on purpose: the browser may
+		 * throttle the timer, but a terminal tab opened from the ball's thread
+		 * should not wait for the user to come back to the DSH page. The poll also
+		 * doubles as a heartbeat: an idle page still reports the unchanged roster
+		 * every few seconds, because the app marks its cache stale after ~15s
+		 * without a report and `terminal_tabs list` would then answer stale:true.
+		 */
+		const TERMINAL_TABS_POLL_MS = 900;
+		const TERMINAL_TABS_REPORT_MS = 350;
+		const TERMINAL_TABS_HEARTBEAT_MS = 5000;
+		const TERMINAL_TABS_ERROR_MS = 3000;
+		const TERMINAL_TABS_BACKOFF_MS = 10000;
+
+		/**
+		 * Install the relay for one store.
+		 *
+		 * Returns a `{ disconnect }` object shaped like the other installers, so
+		 * `ctx.effect` owns the cleanup and a plugin unload stops every timer.
+		 */
+		function installTerminalTabs(store) {
+			// No `bridge() === null` early return: the app may inject
+			// window.DshAndroid after the plugin has already started, and a relay
+			// installed once must come up with it. `poll()` retries on a missing
+			// bridge, so the first successful poll performs the initial report.
+			let stopped = false;
+			let pollTimer = null;
+			let reportTimer = null;
+			let pollFailures = 0;
+			let lastReportKey = "";
+			let lastReportAttemptAt = 0;
+			let reportChain = Promise.resolve();
+
+			const schedulePoll = (delay) => {
+				if (stopped) return;
+				if (pollTimer !== null) clearTimeout(pollTimer);
+				pollTimer = setTimeout(poll, delay);
+			};
+
+			/** The report body: exactly the app's shape, with "" for "no active tab". */
+			const payloadFor = (results) => {
+				const snapshot = store.snapshot();
+				return {
+					tabs: snapshot.tabs,
+					activeId: snapshot.activeId === null || snapshot.activeId === undefined ? "" : snapshot.activeId,
+					results
+				};
+			};
+
+			/** Serialize reports; a stale roster is dropped rather than queued. */
+			const sendReport = (results, force) => {
+				const payload = payloadFor(results);
+				const key = JSON.stringify({ tabs: payload.tabs, activeId: payload.activeId });
+				if (results.length === 0 && force !== true) {
+					if (key === lastReportKey) return;
+				}
+				lastReportAttemptAt = Date.now();
+				reportChain = reportChain
+					.then(() => call("/terminal/tabs/report", payload))
+					.then(() => {
+						lastReportKey = key;
+					})
+					.catch(() => {
+						/* the next poll or roster change reports the fresh state */
+					});
+			};
+
+			/** Run one command against the store; the result is keyed by command id. */
+			const runCommand = (command) => {
+				const id = command !== null && typeof command === "object" ? command.id : undefined;
+				const action = command !== null && typeof command === "object" && typeof command.action === "string"
+					? command.action
+					: "";
+				const target = command !== null && typeof command === "object" && typeof command.target === "string"
+					? command.target
+					: "";
+				const failed = (message) => ({ id, ok: false, error: message });
+				try {
+					if (action === "open") {
+						if (store.count() >= TERMINAL_MAX_TABS) return failed("标签页已满（最多 " + TERMINAL_MAX_TABS + " 个）");
+						const opened = store.openTab();
+						return opened === null
+							? failed("打不开新标签页：本页没有终端服务（需要从 DSH 应用打开本页）")
+							: { id, ok: true, error: "" };
+					}
+					if (action === "activate") {
+						if (target === "") return failed("activate 缺少目标标签页 id");
+						if (store.session(target) === null) return failed("没有这个标签页");
+						store.activate(target);
+						return { id, ok: true, error: "" };
+					}
+					if (action === "close") {
+						if (target === "") return failed("close 缺少目标标签页 id");
+						return store.close(target) ? { id, ok: true, error: "" } : failed("没有这个标签页");
+					}
+					return failed("不认识的标签页操作：" + action);
+				} catch (error) {
+					return failed(String(error && error.message ? error.message : error));
+				}
+			};
+
+			const poll = async () => {
+				if (stopped) return;
+				if (bridge() === null) {
+					schedulePoll(TERMINAL_TABS_ERROR_MS);
+					return;
+				}
+				let answer;
+				try {
+					answer = await call("/terminal/tabs/commands");
+					pollFailures = 0;
+				} catch (error) {
+					pollFailures += 1;
+					schedulePoll(pollFailures > 3 ? TERMINAL_TABS_BACKOFF_MS : TERMINAL_TABS_ERROR_MS);
+					return;
+				}
+				if (stopped) return;
+				const commands = Array.isArray(answer?.commands) ? answer.commands : [];
+				if (commands.length > 0) {
+					sendReport(commands.map(runCommand));
+				} else if (Date.now() - lastReportAttemptAt >= TERMINAL_TABS_HEARTBEAT_MS) {
+					// Same roster, forced past the dedupe: the app treats every report
+					// as proof the page is alive and clears `stale` with it.
+					sendReport([], true);
+				}
+				schedulePoll(TERMINAL_TABS_POLL_MS);
+			};
+
+			// A tab opened/closed/renamed by the user is worth telling the app
+			// about, but the store touches on every PTY output repaint, so the
+			// change report is throttled instead of sent on every notification.
+			const unsubscribe = store.subscribe(() => {
+				if (stopped) return;
+				if (reportTimer !== null) clearTimeout(reportTimer);
+				reportTimer = setTimeout(() => {
+					reportTimer = null;
+					if (!stopped) sendReport([]);
+				}, TERMINAL_TABS_REPORT_MS);
+			});
+
+			// First roster, then commands: the app's `list` should not have to wait
+			// for a tab to change before it knows what is open. Before the bridge
+			// exists this report simply fails; the heartbeat sends it once polling
+			// starts working.
+			sendReport([]);
+			poll();
+
+			return {
+				disconnect() {
+					stopped = true;
+					unsubscribe();
+					if (pollTimer !== null) clearTimeout(pollTimer);
+					if (reportTimer !== null) clearTimeout(reportTimer);
+					pollTimer = null;
+					reportTimer = null;
+				}
+			};
+		}
+		/* ==== @terminal-tabs:end ==== */
 
 		/**
 		 * One PTY session: its own screen, socket and status.
@@ -5616,6 +6197,13 @@ html[data-ds-dark-theme] .dsa-root{--dsa-ball-fill:#3B5BFF}
 				}
 			});
 			ctx.effect(() => () => terminalStore.closeAll(), "dsh-plugin-android: terminals");
+			// The AI's window into those tabs: the app queues commands, this page
+			// runs them against the store and reports the roster back. The store is
+			// page-local by design; the app only relays.
+			ctx.effect(() => {
+				const relay = installTerminalTabs(terminalStore);
+				return () => relay.disconnect();
+			}, "dsh-plugin-android: terminal tabs relay");
 			ctx.effect(() => ctx.locale.register(NS, { zh, en }), "dsh-plugin-android: dictionaries");
 			// The page draws itself in the shell's vocabulary, so its stylesheet
 			// rides the same effect: mounted with the plugin, removed with it.
@@ -5663,6 +6251,18 @@ html[data-ds-dark-theme] .dsa-root{--dsa-ball-fill:#3B5BFF}
 					inject: () => ({ t, part: section.part })
 				}, AndroidSection));
 			}
+			// Its own entry instead of a fourth slice of the sandbox page: the
+			// permission list changes on its own (a tool call in one conversation
+			// adds a row), and revoking is a different kind of action from the
+			// sandbox's start/stop controls.
+			ctx.slots.inject("settings.section", () => ctx.slots.register({
+				name: "settings.section",
+				id: "android-ai",
+				order: 28,
+				label: () => t("navAi"),
+				locale: NS,
+				inject: () => ({ t })
+			}, AiConsentSection));
 
 			ctx.slots.inject("main", function* () {
 				yield ctx.slots.register({

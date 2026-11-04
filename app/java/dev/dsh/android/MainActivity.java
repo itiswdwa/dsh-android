@@ -110,6 +110,17 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
 
     private ValueCallback<Uri[]> fileCallback;
     private final Handler handler = new Handler(Looper.getMainLooper());
+
+    /** One biometric confirmation at a time; bridge threads block waiting for it. */
+    private final java.util.concurrent.atomic.AtomicBoolean biometricBusy =
+            new java.util.concurrent.atomic.AtomicBoolean();
+    /** The prompt currently on screen, if any (cancelled when the activity dies). */
+    private Biometric.Prompt biometricPrompt;
+    /** Set when the prompt has to wait for the app to come back to the foreground. */
+    private PendingBiometric pendingBiometric;
+    /** True between onResume and onPause; the platform refuses prompts from the background. */
+    private boolean foreground;
+
     private boolean panelOpen;
     private String loadedUrl;
     /** True once the harness page has actually painted, not merely started loading. */
@@ -120,6 +131,14 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
 
     /** The activity a service can hand text to; null once it is gone. */
     private static MainActivity live;
+    /**
+     * The plugin's desired keep-screen-on value. It lives here, not in
+     * AndroidApi, so a recreated window re-applies it in onResume instead of
+     * reporting true while the flag is gone.
+     */
+    private static volatile boolean keepScreenOnWanted;
+    /** The Host this instance registered with the bridge; released in onDestroy. */
+    private BridgeServer.Host bridgeHost;
     /** Prompt waiting for a loaded page. */
     private static String pendingPrompt;
     private static final String EXTRA_PROMPT = "dsh.prompt";
@@ -164,7 +183,7 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
                 + " backgroundBlurEnable=" + globalSetting("background_blur_enable")
                 + " isCrossWindowBlurEnabled=" + blurAvailable());
         ShizukuBridge.addPermissionListener();
-        BridgeServer.start(new BridgeServer.Host() {
+        bridgeHost = new BridgeServer.Host() {
             @Override
             public void onChromeModeChanged() {
                 handler.post(() -> applyWindowTheme(preferredDark()));
@@ -250,7 +269,52 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
                     if (decor != null) decor.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
                 });
             }
-        });
+
+            @Override
+            public void onAndroidPermission(String target) {
+                // Only grants that need an Activity run here; AndroidApi opens the
+                // plain settings pages itself.
+                handler.post(() -> {
+                    switch (target) {
+                        case "accessibility":
+                            onAssistPermission(Assist.PERMISSION_ACCESSIBILITY);
+                            break;
+                        case "overlay":
+                            onAssistPermission(Assist.PERMISSION_OVERLAY);
+                            break;
+                        case "microphone":
+                            onAssistPermission(Assist.PERMISSION_MICROPHONE);
+                            break;
+                        case "shizuku":
+                            if (ShizukuBridge.available()) {
+                                ShizukuBridge.requestPermission();
+                            } else {
+                                Toast.makeText(MainActivity.this, "Shizuku 未运行", Toast.LENGTH_SHORT).show();
+                            }
+                            break;
+                        default:
+                            App.log("android permission: unhandled target " + target);
+                    }
+                });
+            }
+
+            @Override
+            public void onScreenKeepOn(boolean on) {
+                // Bridge worker thread: store the wanted value synchronously (so a
+                // GET right after the POST sees it) and apply the window flag on
+                // the main thread, where the window actually lives.
+                MainActivity.this.setKeepScreenOn(on);
+            }
+
+            @Override
+            public void onBiometric(String title, String subtitle, String description,
+                    BridgeServer.BiometricCallback callback) {
+                // Called on a bridge worker thread. The prompt is an Activity thing,
+                // and the activity may have been replaced since the request arrived.
+                runOnUiThread(() -> beginBiometric(title, subtitle, description, callback));
+            }
+        };
+        BridgeServer.start(bridgeHost);
 
         requestStorageAccess();
         // The ball is an opt-in the user made; an app update must not silently
@@ -265,6 +329,62 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
             render();
         } else {
             installPayload();
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        foreground = true;
+        // The window may have been rebuilt while the app was away; the wanted
+        // flag is the durable value, the window attribute is not.
+        applyKeepScreenOn();
+        final PendingBiometric pending = pendingBiometric;
+        if (pending != null) {
+            pendingBiometric = null;
+            // Let onResume finish before the dialog goes up over the window.
+            handler.post(() -> {
+                if (!foreground) {
+                    pending.gate.onResult(false, "DSH 不在前台，无法显示生物识别确认");
+                    return;
+                }
+                showBiometricNow(pending.title, pending.subtitle, pending.description, pending.gate);
+            });
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        foreground = false;
+        super.onPause();
+    }
+
+    // ---------------------------------------------------------- keep-screen-on
+
+    /** The value GET /android/display and /android/info read. */
+    static boolean wantsKeepScreenOn() {
+        return keepScreenOnWanted;
+    }
+
+    /**
+     * Called on the bridge worker thread by `POST /android/display {"keepOn":…}`.
+     * The wanted value is stored synchronously; the window flag itself can only be
+     * touched on the main thread.
+     */
+    private void setKeepScreenOn(boolean on) {
+        keepScreenOnWanted = on;
+        handler.post(this::applyKeepScreenOn);
+    }
+
+    /** Re-apply the wanted flag to whatever window this instance currently owns. */
+    private void applyKeepScreenOn() {
+        if (isFinishing() || isDestroyed()) return;
+        Window window = getWindow();
+        if (window == null) return;
+        if (keepScreenOnWanted) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         }
     }
 
@@ -1220,9 +1340,118 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
         }
     }
 
+    // -------------------------------------------------------------- biometric
+
+    /**
+     * Arrange one system biometric confirmation and answer the bridge thread.
+     *
+     * <p>Rules from docs/AI-API.md and the 1.2.2 revision:
+     *
+     * <ul>
+     *   <li>one prompt at a time — a second request fails readably instead of
+     *       queueing behind the first;</li>
+     *   <li>when the app is in the background, try to bring the task forward
+     *       (works when overlay permission lets us) and only then prompt;</li>
+     *   <li>SDK < 28 / no enrolled biometric gets a readable error, never a
+     *       plain allow-deny fallback.</li>
+     * </ul>
+     */
+    private void beginBiometric(String title, String subtitle, String description,
+            BridgeServer.BiometricCallback callback) {
+        MainActivity activity = live;
+        if (activity == null) {
+            if (callback != null) callback.onResult(false, "DSH 界面没有运行，无法弹出生物识别确认");
+            return;
+        }
+        if (activity != this) {
+            // The host belonged to a destroyed instance; the live one owns the window.
+            activity.beginBiometric(title, subtitle, description, callback);
+            return;
+        }
+        if (callback == null) return;
+        if (!biometricBusy.compareAndSet(false, true)) {
+            callback.onResult(false, "另一次生物识别确认正在进行，请稍后再试");
+            return;
+        }
+
+        final java.util.concurrent.atomic.AtomicBoolean released =
+                new java.util.concurrent.atomic.AtomicBoolean();
+        final BridgeServer.BiometricCallback gate = new BridgeServer.BiometricCallback() {
+            @Override
+            public void onResult(boolean authenticated, String error) {
+                if (!released.compareAndSet(false, true)) return;
+                biometricBusy.set(false);
+                try {
+                    callback.onResult(authenticated, error);
+                } catch (Throwable ignored) {
+                }
+            }
+        };
+
+        if (!foreground) {
+            final PendingBiometric pending =
+                    new PendingBiometric(title, subtitle, description, gate);
+            pendingBiometric = pending;
+            try {
+                Intent intent = new Intent(this, MainActivity.class)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                startActivity(intent);
+            } catch (Throwable error) {
+                pendingBiometric = null;
+                gate.onResult(false, "DSH 不在前台，无法显示生物识别确认："
+                        + (error.getMessage() == null ? error.toString() : error.getMessage()));
+                return;
+            }
+            // The system may silently refuse a background activity start (Android
+            // 10+). onResume will show the prompt if it worked; otherwise say so
+            // instead of leaving the caller blocked for the full 60 s.
+            handler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (pendingBiometric != pending) return;
+                    pendingBiometric = null;
+                    gate.onResult(false, "DSH 不在前台，无法显示生物识别确认；请先回到 DSH 页面再试");
+                }
+            }, 2000);
+            return;
+        }
+        showBiometricNow(title, subtitle, description, gate);
+    }
+
+    private void showBiometricNow(String title, String subtitle, String description,
+            BridgeServer.BiometricCallback gate) {
+        JSONObject status;
+        try {
+            status = Biometric.status();
+        } catch (Throwable error) {
+            gate.onResult(false, "无法读取生物识别状态：" + error);
+            return;
+        }
+        if (!status.optBoolean("available", false)) {
+            gate.onResult(false, status.optString("message", "这台设备没有可用的生物识别"));
+            return;
+        }
+        try {
+            biometricPrompt = Biometric.startPrompt(this, title, subtitle, description,
+                    new Biometric.PromptListener() {
+                        @Override
+                        public void onResult(boolean authenticated, String error) {
+                            biometricPrompt = null;
+                            gate.onResult(authenticated, error);
+                        }
+                    });
+        } catch (Throwable error) {
+            gate.onResult(false, "无法显示生物识别确认：" + error);
+        }
+    }
+
     private void injectBridge() {
         App app = App.i();
-        String script = "window.DshAndroid={version:1"
+        // version 2 is the plugin-facing Android API (`/android/*`, docs/ANDROID-API.md);
+        // 1 only promised base/token/pty.
+        String script = "window.DshAndroid={version:2"
                 + ",base:'http://127.0.0.1:" + app.bridgePort() + "'"
                 + ",token:'" + BridgeServer.token() + "'"
                 + ",pty:{url:'http://127.0.0.1:" + app.ptyPort() + "'"
@@ -1634,8 +1863,53 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
     @Override
     protected void onDestroy() {
         ServerBus.removeListener(this);
+        // Never leave a bridge thread blocked on a prompt this activity can no
+        // longer show. The gate in beginBiometric also releases the busy flag.
+        if (biometricPrompt != null) {
+            Biometric.Prompt prompt = biometricPrompt;
+            biometricPrompt = null;
+            try {
+                prompt.cancel();
+            } catch (Throwable ignored) {
+            }
+        }
+        if (pendingBiometric != null) {
+            PendingBiometric pending = pendingBiometric;
+            pendingBiometric = null;
+            try {
+                pending.gate.onResult(false, "DSH 界面已关闭，未完成确认");
+            } catch (Throwable ignored) {
+            }
+        }
+        biometricBusy.set(false);
+        // A finishing activity must not leave the bridge pointing at a dead Host
+        // (the next request would invoke a destroyed window). releaseHost only
+        // clears it when this instance is still the registered one, so a newly
+        // created activity that already re-registered is not clobbered.
+        BridgeServer.releaseHost(bridgeHost);
+        bridgeHost = null;
+        if (isFinishing()) {
+            // "keepOn" is scoped to the DSH window; leaving the app ends it.
+            keepScreenOnWanted = false;
+        }
         if (live == this) live = null;
         super.onDestroy();
+    }
+
+    /** A prompt waiting for the app to come back to the foreground. */
+    private static final class PendingBiometric {
+        final String title;
+        final String subtitle;
+        final String description;
+        final BridgeServer.BiometricCallback gate;
+
+        PendingBiometric(String title, String subtitle, String description,
+                BridgeServer.BiometricCallback gate) {
+            this.title = title;
+            this.subtitle = subtitle;
+            this.description = description;
+            this.gate = gate;
+        }
     }
 
     private int dp(int value) {

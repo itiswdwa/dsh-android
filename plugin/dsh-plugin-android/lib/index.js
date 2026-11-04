@@ -141,7 +141,14 @@ Environment facts:
 - Network works, but the phone may be on mobile data or behind a VPN in "fake-IP" mode where every public hostname resolves into 198.18.0.0/15. \`web_fetch\` refuses non-public addresses by design, so it reports WEB_BLOCKED_URL for hosts that are perfectly reachable. When that happens, fetch with \`node -e 'fetch(url).then(r => r.text()).then(console.log)'\` from \`bash\` instead of retrying web_fetch.
 - Android's filesystem refuses hard links, so file creation goes through a copy-based publish path locally. If a newly written file ever shows up as a dangling symlink, that is a sandbox bug worth reporting rather than working around.
 - Files opened through the Web UI (attachments, workspace picks) live inside the sandbox; /sdcard is the path that reaches the user's own storage.
-- The floating ball is the only thing the user sees while they are in another app. Its status field is \`ball_doing\`: one short line saying what is running right now, and an empty \`ball_doing\` means "nothing running, fold the bubble away". You do NOT report to it — a separate summarizer watches the work and keeps that line up to date, so there is nothing to remember and nothing to do per step. The \`ball\` command still exists for scripts and for anything that wants to put one line on the ball itself: \`ball "<line>"\`, \`ball --doing "<line>"\`, \`ball --json '{"ball_doing":"<line>"}'\`, \`ball think\`, \`ball done "<line>"\`, \`ball idle\`. A reply is never expected to call it.`;
+- The floating ball is the only thing the user sees while they are in another app. Its status field is \`ball_doing\`: one short line saying what is running right now, and an empty \`ball_doing\` means "nothing running, fold the bubble away". You do NOT report to it — a separate summarizer watches the work and keeps that line up to date, so there is nothing to remember and nothing to do per step. The \`ball\` command still exists for scripts and for anything that wants to put one line on the ball itself: \`ball "<line>"\`, \`ball --doing "<line>"\`, \`ball --json '{"ball_doing":"<line>"}'\`, \`ball think\`, \`ball done "<line>"\`, \`ball idle\`. A reply is never expected to call it.
+
+Android tools (they go through the app's control bridge, not \`shiz\`):
+- \`android_info\` reads device/system/screen/battery/network/storage state plus the capability matrix; \`android_clipboard\` reads or writes the clipboard; \`android_notify\` shows a toast, posts or cancels a notification, or vibrates; \`android_control\` changes volume/brightness/do-not-disturb, shares text, opens a URL/app/settings page, runs a global action or launches an app; \`android_screenshot\` captures the screen to a JPEG file and returns its path and size (the image itself is not put into the context); \`android_biometric\` asks the user for a fingerprint/face or lock-screen credential confirmation; \`terminal_tabs\` lists, opens, activates or closes the terminal tabs of the DSH page.
+- Which capabilities are sensitive is the **user's** choice, set per capability at 设置 → 安卓沙箱 → AI 授权 (defaults: clipboard, 操作手机设置, 截屏; the rest pass directly). Only a capability the user marked high-risk asks for confirmation, and only the first time it is used in a conversation; that conversation is then remembered. Unmarked capabilities are allowed directly, with no prompt. If the user declines, the tool fails with a readable reason — do not retry in a loop and do not look for a way around it; tell the user what was refused.
+- The user reviews and revokes grants and changes the high-risk set at 设置 → 安卓沙箱 → AI 授权; after a revoke the next high-risk call asks again.
+- This gate guards the AI entry point, not the bridge: plugins that hold the bridge token and call \`/android/*\` directly are not subject to these per-conversation grants. That is not a way around a refusal — the user's decision stands, and you must not route a declined action through such a plugin.
+- \`terminal_tabs\` needs the DSH page to be open in the app (the app relays each command to the page). If it reports that the page did not answer, ask the user to switch back to the DSH page instead of retrying.`;
 
 /** Loopback bridge of the DSH Android app; the app exports these on launch. */
 const BRIDGE_URL_VAR = "DSH_ANDROID_BRIDGE_URL";
@@ -153,6 +160,500 @@ function bridgeUrl() {
 
 function bridgeToken() {
   return process.env[BRIDGE_TOKEN_VAR] ?? "";
+}
+
+/* ======================================================================
+ * AI tools (docs/AI-API.md §4)
+ * ----------------------------------------------------------------------
+ * The app, not this plugin, owns the permission decision: `/ai/android`
+ * and `/ai/terminal/tabs` take the calling conversation's session id and,
+ * on the first call for a capability, pop the system biometric sheet and
+ * remember the grant under that id. `exec.agent.id` is therefore the whole
+ * authorization key — never reuse a constant or a title here.
+ *
+ * `@deepseek-ai/dsh-tools` is deliberately not imported: this plugin is
+ * shipped as a hot package, where that package does not resolve from the
+ * profile. The raw ToolDefinition shape is built by hand instead.
+ * ========================================================================== */
+
+const AI_ANDROID_PATH = "/ai/android";
+const AI_TERMINAL_TABS_PATH = "/ai/terminal/tabs";
+const AI_CONSENT_PATH = "/ai/consent";
+const BIOMETRIC_PATH = "/android/biometric";
+
+/** One normal bridge round-trip; the app answers in milliseconds. */
+const AI_TIMEOUT_MS = 20000;
+/** A first call may block on the system biometric sheet (the app caps it at 60s). */
+const AI_CONSENT_TIMEOUT_MS = 70000;
+/** The consent preflight is a loopback GET; do not wait long on an app without it. */
+const AI_PREFLIGHT_TIMEOUT_MS = 5000;
+
+/** `render` is model-facing text; keep one result under this many characters. */
+const AI_RENDER_LIMIT = 16000;
+
+/** The six capabilities from the contract, named for a human. */
+const AI_CAPABILITY_LABELS = {
+  read: "读取设备与状态",
+  clipboard: "剪贴板",
+  notify: "提示与通知",
+  control: "操作手机设置",
+  screenshot: "截屏",
+  terminal: "终端标签页"
+};
+
+/**
+ * What to tell the model when the app answers with `needs`.
+ *
+ * The value is not an error code to swallow: every entry names the switch the
+ * user would have to flip, because "failed" with no next step is how a phone
+ * assistant gets called useless.
+ */
+const AI_NEEDS_HINTS = {
+  consent: "用户拒绝了这个对话的授权，或当前高危能力配置不允许这次调用（可在 设置 → 安卓沙箱 → AI 授权 查看或调整）",
+  biometric: "需要先在系统里录入指纹/人脸或设置锁屏，然后再试一次",
+  foreground: "请回到 DSH 页面再试",
+  android9: "需要 Android 9 及以上",
+  android11: "需要 Android 11 及以上",
+  android12: "需要 Android 12 及以上",
+  accessibility: "需要先在 设置 → 安卓沙箱 → 手机助手 打开无障碍服务",
+  overlay: "需要在 设置 → 安卓沙箱 里授予悬浮窗权限",
+  write_settings: "需要在 设置 → 应用 → DSH → 修改系统设置 里授权",
+  dnd_access: "需要在系统「勿扰」设置里授予 DSH 访问权限（设置 → 通知 → 勿扰）",
+  notification: "请在 设置 → 应用 → DSH → 通知 里打开通知",
+  microphone: "需要在 设置 → 应用 → DSH → 权限 → 麦克风 里授权",
+  shizuku: "需要先在 Shizuku 应用里授予 DSH 权限",
+  battery: "请在 设置 → 应用 → DSH → 电池 里允许后台运行"
+};
+
+/** The message field of an error, for messages that wrap another failure. */
+function describeError(error) {
+  if (error === null || error === undefined) return "未知错误";
+  if (typeof error === "string") return error;
+  return typeof error.message === "string" && error.message !== "" ? error.message : String(error);
+}
+
+/**
+ * One authenticated JSON call to the loopback control bridge.
+ *
+ * `options.method` defaults to POST; the body is serialized only when supplied,
+ * so GETs carry no `Content-Type`. The timeout covers the response body read
+ * too — a bridge that accepts the connection and then stalls is the same
+ * failure to the caller as one that never answers.
+ *
+ * @param path - bridge path, e.g. `/ai/android`.
+ * @param options - `{ method, body, timeoutMs, signal }`.
+ * @returns The parsed JSON object the bridge answered with.
+ */
+async function bridgeRequest(path, options = {}) {
+  const base = bridgeUrl();
+  if (base === "") {
+    throw new Error("安卓控制桥不可用：没有拿到 DSH_ANDROID_BRIDGE_URL（这个会话不在 DSH Android 应用里运行）");
+  }
+  const url = base.replace(/\/+$/, "") + path;
+  const timeoutMs = typeof options.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+    ? options.timeoutMs
+    : AI_TIMEOUT_MS;
+  const signal = options.signal;
+  const method = typeof options.method === "string" ? options.method : "POST";
+  const body = options.body;
+  const controller = new AbortController();
+  let timedOut = false;
+  let cancelled = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const onAbort = () => {
+    cancelled = true;
+    controller.abort();
+  };
+  const external = signal !== undefined && signal !== null && typeof signal.addEventListener === "function";
+  if (external) {
+    if (signal.aborted === true) onAbort();
+    else signal.addEventListener("abort", onAbort);
+  }
+  const cleanup = () => {
+    clearTimeout(timer);
+    if (external) signal.removeEventListener("abort", onAbort);
+  };
+  let response;
+  let text;
+  try {
+    response = await fetch(url, {
+      method,
+      headers: body === undefined
+        ? { "X-Dsh-Token": bridgeToken() }
+        : { "X-Dsh-Token": bridgeToken(), "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal
+    });
+    text = await response.text();
+  } catch (error) {
+    if (timedOut) throw new Error(`安卓控制桥 ${Math.round(timeoutMs / 1000)} 秒内没有响应（${path}），请稍后重试`);
+    if (cancelled) throw new Error("调用已被取消");
+    throw new Error(`连不上安卓控制桥（${base}）：${describeError(error)}。请确认 DSH Android 应用正在运行`);
+  } finally {
+    cleanup();
+  }
+  let data;
+  try {
+    data = text === "" ? {} : JSON.parse(text);
+  } catch (error) {
+    throw new Error(`安卓控制桥返回了无法解析的响应（${path}）：${String(text).slice(0, 200)}`);
+  }
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error(`安卓控制桥返回了意外响应（${path}）`);
+  }
+  if (response.ok !== true) {
+    const message = typeof data.error === "string" && data.error !== "" ? data.error : `HTTP ${response.status}`;
+    throw new Error(`安卓控制桥拒绝了请求（${path}）：${message}`);
+  }
+  return data;
+}
+
+/** A readable `Error` for one failed `{ ok: false, error, hint, needs }` answer. */
+function aiFailure(data, path) {
+  const parts = [];
+  const message = typeof data.error === "string" && data.error.trim() !== ""
+    ? data.error.trim()
+    : `安卓接口失败（${path}）`;
+  const capability = typeof data.capability === "string" && data.capability !== ""
+    ? `（能力：${AI_CAPABILITY_LABELS[data.capability] ?? data.capability}）`
+    : "";
+  parts.push(message + capability);
+  if (typeof data.needs === "string" && data.needs !== "" && AI_NEEDS_HINTS[data.needs] !== undefined) {
+    parts.push(AI_NEEDS_HINTS[data.needs]);
+  }
+  if (typeof data.hint === "string" && data.hint.trim() !== "") parts.push(data.hint.trim());
+  return new Error(parts.join("；"));
+}
+
+/** `{ ok: true, ...result }` — the contract's uniform tool value. */
+function unwrapAiResult(data) {
+  const { ok: _ok, ...rest } = data;
+  return { ok: true, ...rest };
+}
+
+/** Whether `session` already holds `capability`, so no biometric sheet is due. */
+async function hasGrant(session, capability, signal) {
+  if (session === "" || capability === "") return false;
+  try {
+    const data = await bridgeRequest(AI_CONSENT_PATH, {
+      method: "GET",
+      timeoutMs: AI_PREFLIGHT_TIMEOUT_MS,
+      signal
+    });
+    const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+    for (const entry of sessions) {
+      if (entry === null || typeof entry !== "object" || entry.session !== session) continue;
+      const grants = Array.isArray(entry.grants) ? entry.grants : [];
+      return grants.some((grant) => grant !== null && typeof grant === "object" && grant.capability === capability);
+    }
+    return false;
+  } catch {
+    // An app without GET /ai/consent — or a transient failure — is exactly the
+    // case where the call may pop the confirmation: the long budget is right.
+    return false;
+  }
+}
+
+/**
+ * The timeout for one capability call.
+ *
+ * A granted capability cannot prompt, so it gets the normal budget; a call
+ * that may still pop the biometric sheet gets the long one. This is a hint
+ * only — the app is authoritative and its 60s cap is below both values.
+ */
+async function timeoutFor(session, capability, signal) {
+  const granted = await hasGrant(session, capability, signal);
+  return granted ? AI_TIMEOUT_MS : AI_CONSENT_TIMEOUT_MS;
+}
+
+/** The calling conversation's id: the authorization key. */
+function sessionIdOf(exec) {
+  const id = exec?.agent?.id;
+  if (typeof id === "string" && id !== "") return id;
+  throw new Error("这个工具需要在 DSH 会话里运行：拿不到会话 id，无法按对话请求安卓授权");
+}
+
+/** The conversation's title, best effort, so the app can show it in 设置. */
+function sessionTitleOf(ctx, exec) {
+  try {
+    const session = exec?.agent?.session;
+    if (session === undefined || session === null) return "";
+    const title = ctx.sessionProjections?.stateOf?.(session, "title");
+    if (typeof title === "string") return title.trim();
+  } catch {
+    /* no projection service: the title is optional */
+  }
+  return "";
+}
+
+/** A model-facing text block; the render side of every AI tool. */
+function renderToolValue(value) {
+  let text;
+  try {
+    text = JSON.stringify(value, null, 2);
+  } catch {
+    text = "";
+  }
+  if (typeof text !== "string" || text === "") text = String(value ?? "");
+  if (text.length <= AI_RENDER_LIMIT) return text;
+  return `${text.slice(0, AI_RENDER_LIMIT)}\n…（结果超过约 16KB，已截断；完整结果没有放进上下文）`;
+}
+
+/** One parameter schema: an object with the named properties and allowed ones only. */
+function objectParameters(properties, required) {
+  return {
+    type: "object",
+    properties: properties ?? {},
+    ...(Array.isArray(required) && required.length > 0 ? { required } : {}),
+    additionalProperties: false
+  };
+}
+
+/**
+ * The shared output contract.
+ *
+ * `additionalProperties: true` is load-bearing: the app's answer is forwarded
+ * almost verbatim (tabs, file, width, battery, …), and a schema that demanded
+ * named fields would reject a perfectly good result from a newer app.
+ */
+const AI_TOOL_OUTPUT = {
+  schema: {
+    type: "object",
+    properties: {
+      ok: { type: "boolean", description: "Whether the call succeeded." }
+    },
+    required: ["ok"],
+    additionalProperties: true
+  },
+  render: (_args, value) => [{ type: "text", text: renderToolValue(value) }]
+};
+
+/** Run one AI tool: the capability check, the bridge call, the readable failure. */
+async function executeAiTool(ctx, spec, args, exec) {
+  const input = args !== null && typeof args === "object" && !Array.isArray(args) ? args : {};
+  const session = sessionIdOf(exec);
+  const signal = exec?.signal;
+  const title = sessionTitleOf(ctx, exec);
+
+  if (spec.kind === "biometric") {
+    // The reason is the *subtitle* of the system sheet: the app prefixes its
+    // own "DSH 请求：" title, so passing reason as title would fight it.
+    const subtitle = typeof input.reason === "string" && input.reason.trim() !== ""
+      ? input.reason.trim()
+      : "请确认这次操作";
+    const data = await bridgeRequest(BIOMETRIC_PATH, {
+      body: { subtitle },
+      timeoutMs: AI_CONSENT_TIMEOUT_MS,
+      signal
+    });
+    if (data.ok !== true) throw aiFailure(data, BIOMETRIC_PATH);
+    return unwrapAiResult(data);
+  }
+
+  if (spec.kind === "terminal") {
+    const action = typeof input.action === "string" ? input.action : "";
+    if (!["list", "open", "activate", "close"].includes(action)) {
+      throw new Error("terminal_tabs 的 action 必须是 list / open / activate / close");
+    }
+    const id = typeof input.id === "string" ? input.id : "";
+    if ((action === "activate" || action === "close") && id === "") {
+      throw new Error(`terminal_tabs 的 ${action} 需要 id：先用 action="list" 看一下标签页 id`);
+    }
+    const payload = { session, action };
+    if (title !== "") payload.sessionTitle = title;
+    if (id !== "") payload.id = id;
+    const timeoutMs = await timeoutFor(session, "terminal", signal);
+    const data = await bridgeRequest(AI_TERMINAL_TABS_PATH, { body: payload, timeoutMs, signal });
+    if (data.ok !== true) throw aiFailure(data, AI_TERMINAL_TABS_PATH);
+    return unwrapAiResult(data);
+  }
+
+  const request = spec.request(input);
+  const payload = {
+    session,
+    path: request.path,
+    method: request.method,
+    query: request.query ?? "",
+    body: request.body ?? {}
+  };
+  if (title !== "") payload.sessionTitle = title;
+  const timeoutMs = await timeoutFor(session, spec.capability, signal);
+  const data = await bridgeRequest(AI_ANDROID_PATH, { body: payload, timeoutMs, signal });
+  if (data.ok !== true) throw aiFailure(data, request.path);
+  return unwrapAiResult(data);
+}
+
+/** Build one raw ToolDefinition (the shape `ctx.tools.register` accepts). */
+function aiToolDefinition(ctx, spec) {
+  return {
+    name: spec.name,
+    description: spec.description,
+    parameters: spec.parameters,
+    output: AI_TOOL_OUTPUT,
+    execute: (args, exec) => executeAiTool(ctx, spec, args, exec)
+  };
+}
+
+/** The seven tools from the contract, each mapped onto the endpoint it wraps. */
+function createAiToolDefinitions(ctx) {
+  const post = (path, body) => ({ path, method: "POST", body });
+  return [
+    aiToolDefinition(ctx, {
+      name: "android_info",
+      description: "读取这台 Android 手机的状态：设备与系统、屏幕、电池、网络、存储，以及能力矩阵（哪些权限/服务已开启）。只读，不改动手机。若用户把「读取设备与状态」设为高危能力，第一次用于某个对话时会要求指纹/人脸确认；否则直接放行（设置 → 安卓沙箱 → AI 授权 里配置）。",
+      capability: "read",
+      parameters: objectParameters({}),
+      request: () => ({ path: "/android/info", method: "GET", body: {} })
+    }),
+    aiToolDefinition(ctx, {
+      name: "android_clipboard",
+      description: "读写手机剪贴板。action=get 读取当前文本；action=set 把 text 写入剪贴板。若用户把「剪贴板」设为高危能力，第一次用于某个对话时会要求指纹/人脸确认；否则直接放行（设置 → 安卓沙箱 → AI 授权 里配置）。",
+      capability: "clipboard",
+      parameters: objectParameters({
+        action: { type: "string", enum: ["get", "set"], description: "get 读取；set 写入。" },
+        text: { type: "string", description: "action=set 时要写入的文本。" }
+      }, ["action"]),
+      request: (input) => {
+        if (input.action === "get") return { path: "/android/clipboard", method: "GET", body: {} };
+        if (input.action === "set") {
+          const text = typeof input.text === "string" ? input.text : "";
+          if (text === "") throw new Error("android_clipboard 写剪贴板需要 text");
+          return post("/android/clipboard", { text });
+        }
+        throw new Error("android_clipboard 的 action 必须是 get 或 set");
+      }
+    }),
+    aiToolDefinition(ctx, {
+      name: "android_notify",
+      description: "在手机上提醒用户：action=toast 弹一条轻提示（text）、action=notify 发一条通知（title 和/或 text，可选 id）、action=cancel 取消通知（id 或 all=true 二选一）、action=vibrate 震动（ms）。若用户把「提示与通知」设为高危能力，第一次用于某个对话时会要求指纹/人脸确认；否则直接放行（设置 → 安卓沙箱 → AI 授权 里配置）。",
+      capability: "notify",
+      parameters: objectParameters({
+        action: { type: "string", enum: ["toast", "notify", "cancel", "vibrate"], description: "要做的提示动作。" },
+        text: { type: "string", description: "toast/notify 的正文。" },
+        title: { type: "string", description: "notify 的标题。" },
+        id: { type: "integer", description: "notify/cancel 的通知 id（1–999）。" },
+        all: { type: "boolean", description: "cancel 时取消全部插件通知。" },
+        ms: { type: "integer", description: "vibrate 的时长（毫秒）。" }
+      }, ["action"]),
+      request: (input) => {
+        const number = (key, min, max) => {
+          const value = input[key];
+          if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+          return Math.min(max, Math.max(min, Math.round(value)));
+        };
+        if (input.action === "toast") {
+          const text = typeof input.text === "string" ? input.text : "";
+          if (text === "") throw new Error("android_notify 的 toast 需要 text");
+          return post("/android/toast", { text });
+        }
+        if (input.action === "notify") {
+          const body = {};
+          const title = typeof input.title === "string" ? input.title : "";
+          const text = typeof input.text === "string" ? input.text : "";
+          if (title === "" && text === "") throw new Error("android_notify 的 notify 至少需要 title 或 text");
+          if (title !== "") body.title = title;
+          if (text !== "") body.text = text;
+          const id = number("id", 1, 999);
+          if (id !== undefined) body.id = id;
+          return post("/android/notify", body);
+        }
+        if (input.action === "cancel") {
+          if (input.all === true) return post("/android/notify/cancel", { all: true });
+          const id = number("id", 1, 999);
+          if (id === undefined) {
+            throw new Error("android_notify 的 cancel 需要 id（取消哪条通知）或 all=true（取消全部插件通知）");
+          }
+          return post("/android/notify/cancel", { id });
+        }
+        if (input.action === "vibrate") {
+          const body = {};
+          const ms = number("ms", 1, 60000);
+          if (ms !== undefined) body.ms = ms;
+          return post("/android/vibrate", body);
+        }
+        throw new Error("android_notify 的 action 必须是 toast / notify / cancel / vibrate");
+      }
+    }),
+    aiToolDefinition(ctx, {
+      name: "android_control",
+      description: "改动手机或拉起界面，params 直接透传给对应接口。示例：volume {\"stream\":\"music\",\"percent\":30}；brightness {\"brightness\":50}；dnd {\"filter\":\"priority\"}；share {\"text\":\"看这个\"}；open {\"url\":\"https://example.com\"}；global {\"action\":\"home\"}（global 还支持 {\"action\":\"dismiss_notifications\"} 与 {\"action\":\"screenshot\"}）；apps {\"action\":\"launch\",\"package\":\"com.tencent.mm\"}。字段全集：volume（stream/percent/adjust/ringer/media）、brightness（brightness/auto/rotation/keepOn）、dnd（filter）、share（text/title）、open（url/package/settings）、global（back/home/recents/notifications/lock/quick_settings/power_dialog/split_screen/dismiss_notifications/screenshot）、apps（action=launch|details|uninstall + package）。若用户把「操作手机设置」设为高危能力，第一次用于某个对话时会要求指纹/人脸确认；否则直接放行（设置 → 安卓沙箱 → AI 授权 里配置）。",
+      capability: "control",
+      parameters: objectParameters({
+        action: { type: "string", enum: ["volume", "brightness", "dnd", "share", "open", "global", "apps"], description: "要改哪一类。" },
+        params: { type: "object", additionalProperties: true, description: "对应接口的字段，例如 {stream:\"music\",percent:30}。" }
+      }, ["action"]),
+      request: (input) => {
+        const params = input.params !== null && typeof input.params === "object" && !Array.isArray(input.params) ? input.params : {};
+        const routes = {
+          volume: "/android/volume",
+          brightness: "/android/display",
+          dnd: "/android/dnd",
+          share: "/android/share",
+          open: "/android/open",
+          global: "/android/global",
+          apps: "/android/apps"
+        };
+        const path = routes[input.action];
+        if (path === undefined) {
+          throw new Error("android_control 的 action 必须是 volume / brightness / dnd / share / open / global / apps");
+        }
+        return post(path, params);
+      }
+    }),
+    aiToolDefinition(ctx, {
+      name: "android_screenshot",
+      description: "截一张手机屏幕，保存成 JPEG 文件并返回路径、宽高与字节数；截图内容不会进入上下文（需要时可让用户打开那个文件）。若用户把「截屏」设为高危能力，第一次用于某个对话时会要求指纹/人脸确认；否则直接放行（设置 → 安卓沙箱 → AI 授权 里配置）。另外需要开启无障碍服务和 Android 11 及以上。",
+      capability: "screenshot",
+      parameters: objectParameters({}),
+      request: () => post("/android/screenshot", {})
+    }),
+    aiToolDefinition(ctx, {
+      name: "android_biometric",
+      description: "请求用户在手机上做一次指纹/人脸（或锁屏凭据）确认，用来确认敏感操作。不需要按对话授权：每次调用都会真的弹窗。reason 会显示在系统弹窗上。",
+      kind: "biometric",
+      parameters: objectParameters({
+        reason: { type: "string", description: "为什么需要确认，会显示给用户。" }
+      })
+    }),
+    aiToolDefinition(ctx, {
+      name: "terminal_tabs",
+      description: "管理 DSH 页面里的终端标签页：action=list 列出、open 新建、activate 切换到 id、close 关闭 id。返回 tabs（id/title/active）与 activeId。若用户把「终端标签页」设为高危能力，第一次用于某个对话时会要求指纹/人脸确认；否则直接放行（设置 → 安卓沙箱 → AI 授权 里配置）。页面不在前台/被冻结时可能没有响应，需要用户回到 DSH 页面。",
+      kind: "terminal",
+      parameters: objectParameters({
+        action: { type: "string", enum: ["list", "open", "activate", "close"], description: "要做的标签页操作。" },
+        id: { type: "string", description: "activate/close 的标签页 id（来自 list）。" }
+      }, ["action"])
+    })
+  ];
+}
+
+/**
+ * Register the AI tools through the `tools` service.
+ *
+ * `ctx.inject` is what keeps an older profile without a `tools` service from
+ * failing the whole plugin load: the callback simply never runs there.
+ */
+function installAiTools(ctx) {
+  ctx.inject(["tools"], (scope) => {
+    const registry = scope?.tools;
+    if (registry === null || registry === undefined || typeof registry.register !== "function") {
+      ctx.logger?.warn?.("android-ai-tools: tools service is unavailable; android_* tools not registered");
+      return;
+    }
+    let registered = 0;
+    for (const definition of createAiToolDefinitions(ctx)) {
+      try {
+        registry.register(definition);
+        registered += 1;
+      } catch (error) {
+        ctx.logger?.warn?.(`android-ai-tools: could not register ${definition.name}: ${describeError(error)}`);
+      }
+    }
+    ctx.logger?.info?.(`android-ai-tools: registered ${registered} tool(s)`);
+  });
 }
 
 /** Drop the tools a ball session cannot use; other sessions are untouched. */
@@ -398,6 +899,8 @@ function installBallSurface(ctx, cfg) {
 }
 
 export function apply(ctx, config = {}) {
+  installAiTools(ctx);
+
   ctx.inject(["systemPrompt"], (scope) => {
     let order = 10150;
     try {
