@@ -39,6 +39,8 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
+import { disposeTerminalSessions, runTerminalAction } from "./terminal.js";
+
 const ANDROID_SURFACE_SECTION = "app:android-surface";
 
 /** The section name for the floating ball's own conversation. */
@@ -144,11 +146,12 @@ Environment facts:
 - The floating ball is the only thing the user sees while they are in another app. Its status field is \`ball_doing\`: one short line saying what is running right now, and an empty \`ball_doing\` means "nothing running, fold the bubble away". You do NOT report to it — a separate summarizer watches the work and keeps that line up to date, so there is nothing to remember and nothing to do per step. The \`ball\` command still exists for scripts and for anything that wants to put one line on the ball itself: \`ball "<line>"\`, \`ball --doing "<line>"\`, \`ball --json '{"ball_doing":"<line>"}'\`, \`ball think\`, \`ball done "<line>"\`, \`ball idle\`. A reply is never expected to call it.
 
 Android tools (they go through the app's control bridge, not \`shiz\`):
-- \`android_info\` reads device/system/screen/battery/network/storage state plus the capability matrix; \`android_clipboard\` reads or writes the clipboard; \`android_notify\` shows a toast, posts or cancels a notification, or vibrates; \`android_control\` changes volume/brightness/do-not-disturb, shares text, opens a URL/app/settings page, runs a global action or launches an app; \`android_screenshot\` captures the screen to a JPEG file and returns its path and size (the image itself is not put into the context); \`android_biometric\` asks the user for a fingerprint/face or lock-screen credential confirmation; \`terminal_tabs\` lists, opens, activates or closes the terminal tabs of the DSH page.
+- \`android_info\` reads device/system/screen/battery/network/storage state plus the capability matrix; \`android_clipboard\` reads or writes the clipboard; \`android_notify\` shows a toast, posts or cancels a notification, or vibrates; \`android_control\` changes volume/brightness/do-not-disturb, shares text, opens a URL/app/settings page, runs a global action or launches an app; \`android_screenshot\` captures the screen to a JPEG file and returns its path and size (the image itself is not put into the context); \`android_biometric\` asks the user for a fingerprint/face or lock-screen credential confirmation; \`terminal_tabs\` lists, opens, activates or closes the terminal tabs of the DSH page; \`terminal\` runs a command in the sandbox or keeps a persistent AI terminal session (\`exec\`/\`start\`/\`write\`/\`read\`/\`close\`/\`list\`). An AI terminal is its own PTY in the same PRoot guest, not one of the page's visible tabs; it runs as the same root user and reaches the same files.
 - Which capabilities are sensitive is the **user's** choice, set per capability at 设置 → 安卓沙箱 → AI 授权 (defaults: clipboard, 操作手机设置, 截屏; the rest pass directly). Only a capability the user marked high-risk asks for confirmation, and only the first time it is used in a conversation; that conversation is then remembered. Unmarked capabilities are allowed directly, with no prompt. If the user declines, the tool fails with a readable reason — do not retry in a loop and do not look for a way around it; tell the user what was refused.
 - The user reviews and revokes grants and changes the high-risk set at 设置 → 安卓沙箱 → AI 授权; after a revoke the next high-risk call asks again.
 - This gate guards the AI entry point, not the bridge: plugins that hold the bridge token and call \`/android/*\` directly are not subject to these per-conversation grants. That is not a way around a refusal — the user's decision stands, and you must not route a declined action through such a plugin.
-- \`terminal_tabs\` needs the DSH page to be open in the app (the app relays each command to the page). If it reports that the page did not answer, ask the user to switch back to the DSH page instead of retrying.`;
+- \`terminal_tabs\` needs the DSH page to be open in the app (the app relays each command to the page). If it reports that the page did not answer, ask the user to switch back to the DSH page instead of retrying.
+- \`terminal\` does not need the DSH page: it starts its own PTY in the guest. Use it for real shell work (builds, scripts, package installs); use \`terminal_tabs\` only when the user asked to see or drive the page's visible tabs. Both go through the same 设置 → 安卓沙箱 → AI 授权 中的「终端」能力。`;
 
 /** Loopback bridge of the DSH Android app; the app exports these on launch. */
 const BRIDGE_URL_VAR = "DSH_ANDROID_BRIDGE_URL";
@@ -198,7 +201,7 @@ const AI_CAPABILITY_LABELS = {
   notify: "提示与通知",
   control: "操作手机设置",
   screenshot: "截屏",
-  terminal: "终端标签页"
+  terminal: "终端（标签页与命令）"
 };
 
 /**
@@ -369,6 +372,24 @@ async function timeoutFor(session, capability, signal) {
   return granted ? AI_TIMEOUT_MS : AI_CONSENT_TIMEOUT_MS;
 }
 
+/**
+ * Pass the app's existing `terminal` capability check before touching a PTY.
+ *
+ * The terminal was already a capability (the page-tab relay gates on it); the
+ * AI terminal reuses that switch rather than inventing a second one. A `list`
+ * is enough to run the app's high-risk check without touching the page: if the
+ * user marked 终端 as high-risk, this is where the system biometric sheet
+ * appears, and only a granted call gets past it.
+ */
+async function ensureTerminalAccess(session, title, signal) {
+  const payload = { session, action: "list" };
+  if (title !== "") payload.sessionTitle = title;
+  const timeoutMs = await timeoutFor(session, "terminal", signal);
+  const data = await bridgeRequest(AI_TERMINAL_TABS_PATH, { body: payload, timeoutMs, signal });
+  if (data.ok !== true) throw aiFailure(data, AI_TERMINAL_TABS_PATH);
+  return data;
+}
+
 /** The calling conversation's id: the authorization key. */
 function sessionIdOf(exec) {
   const id = exec?.agent?.id;
@@ -431,6 +452,9 @@ const AI_TOOL_OUTPUT = {
   render: (_args, value) => [{ type: "text", text: renderToolValue(value) }]
 };
 
+/** Exported for the tool-level tests; the plugin itself only uses it internally. */
+export { createAiToolDefinitions };
+
 /** Run one AI tool: the capability check, the bridge call, the readable failure. */
 async function executeAiTool(ctx, spec, args, exec) {
   const input = args !== null && typeof args === "object" && !Array.isArray(args) ? args : {};
@@ -469,6 +493,13 @@ async function executeAiTool(ctx, spec, args, exec) {
     const data = await bridgeRequest(AI_TERMINAL_TABS_PATH, { body: payload, timeoutMs, signal });
     if (data.ok !== true) throw aiFailure(data, AI_TERMINAL_TABS_PATH);
     return unwrapAiResult(data);
+  }
+
+  if (spec.kind === "pty") {
+    // The app owns the permission decision (including a possible biometric
+    // sheet); the PTY itself is only started after that gate answers ok.
+    await ensureTerminalAccess(session, title, signal);
+    return runTerminalAction(input);
   }
 
   const request = spec.request(input);
@@ -625,6 +656,20 @@ function createAiToolDefinitions(ctx) {
       parameters: objectParameters({
         action: { type: "string", enum: ["list", "open", "activate", "close"], description: "要做的标签页操作。" },
         id: { type: "string", description: "activate/close 的标签页 id（来自 list）。" }
+      }, ["action"])
+    }),
+    aiToolDefinition(ctx, {
+      name: "terminal",
+      description: "在手机沙箱里执行终端命令，或维护持久终端会话。action=exec 执行一条命令并返回输出/退出码；start 新建持久会话（返回 sessionId）；write 向会话写入（enter 默认 true）；read 读取新输出；close 关闭；list 列出 AI 会话。命令以 root 在同一个 PRoot guest 运行，和终端面板同一文件系统，但 AI 会话不显示在页面标签页里。属于「终端」能力：若用户把终端设为高危，第一次使用会要求指纹/人脸确认；否则直接放行。",
+      kind: "pty",
+      parameters: objectParameters({
+        action: { type: "string", enum: ["exec", "start", "write", "read", "close", "list"], description: "exec 一次性执行；start/write/read/close 管持久会话；list 列出 AI 会话。" },
+        command: { type: "string", description: "action=exec 要执行的 shell 命令（可多行）。" },
+        cwd: { type: "string", description: "工作目录，默认 /root。" },
+        timeoutMs: { type: "integer", minimum: 1000, maximum: 120000, description: "exec 超时毫秒，默认 30000，最大 120000。" },
+        sessionId: { type: "string", description: "write/read/close 的会话 id（来自 start 或 list）。" },
+        text: { type: "string", description: "action=write 要写入的文本。" },
+        enter: { type: "boolean", description: "write 时是否补一个回车，默认 true。" }
       }, ["action"])
     })
   ];
@@ -900,6 +945,14 @@ function installBallSurface(ctx, cfg) {
 
 export function apply(ctx, config = {}) {
   installAiTools(ctx);
+
+  // Persistent AI PTYs belong to this plugin instance. Close them when the row
+  // unloads so a reload does not leave shells nobody can address.
+  try {
+    ctx.effect(() => () => { disposeTerminalSessions().catch(() => {}); }, "dsh-plugin-android: ai terminal sessions");
+  } catch {
+    /* older host without effect(): the PTY service still reaps detached shells */
+  }
 
   ctx.inject(["systemPrompt"], (scope) => {
     let order = 10150;

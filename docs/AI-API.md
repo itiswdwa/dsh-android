@@ -66,7 +66,7 @@
 | `notify` | 提示与通知 | `/android/toast` `/android/vibrate` `/android/notify` POST `/android/notify/cancel` | 低危 |
 | `control` | 操作手机设置 | `/android/volume` `/android/display` `/android/dnd` 的 POST；`/android/share` `/android/open` `/android/global`；`/android/apps` POST；`POST /android/permissions` | **高危** |
 | `screenshot` | 截屏 | `/android/screenshot` | **高危** |
-| `terminal` | 终端标签页 | `/ai/terminal/tabs` | 低危 |
+| `terminal` | 终端（标签页与命令） | `/ai/terminal/tabs`；host 插件的 `terminal` 工具（先过一次 `/ai/terminal/tabs` 的 `list` 检查） | 低危 |
 
 - **高危能力**：第一次用于某个对话时弹一次系统生物识别确认，通过后这个对话不再询问，
   直到在设置里撤销；应用重启后仍有效；
@@ -234,9 +234,28 @@ POST /terminal/tabs/report
   （「打不开新标签页：本页没有终端服务（需要从 DSH 应用打开本页）」）、未知标签页
   （「没有这个标签页」）、缺 `target`（「activate/close 缺少目标标签页 id」）。
 
+### AI 自己的终端会话（host 插件，不经过 `/ai` 桥）
+
+host 插件的 `terminal` 工具不走上面这个页面中继，而是直接连 guest 里的
+`android-pty`（`payload/opt/dsh/android/pty-server.mjs`，127.0.0.1:3099，`X-Dsh-Token`
+是 `DSH_PTY_TOKEN`）。所以：
+
+- `action=exec` 建一个临时 PTY，用非交互 `bash` 执行一条命令，返回 `output`/`exitCode`/
+  `timedOut`/`truncated`；命令以 root 在同一个 PRoot guest 跑，能访问 `/sdcard`、`shiz`、
+  `ui` 和终端面板看到的同一套文件；
+- `start`/`write`/`read`/`close`/`list` 管一组**持久 AI 会话**（Node 进程内保存 WebSocket，
+  最多 4 个，pty-server 自己最多 8 个 session）；
+- 这些会话是**独立的 PTY**，**不会**出现在页面的终端标签里，也不受标签页的 4 个上限约束；
+- 执行前先调一次 `/ai/terminal/tabs` 的 `action=list`，复用 `terminal` 能力的按对话授权：
+  用户把「终端」设为高危时，第一次 `terminal` 工具调用会弹一次确认；默认低危直接放行。
+  这一步只为了复用应用侧的授权检查，`list` 的结果被丢弃；没有页面也能过。
+
+`terminal` 的返回是普通工具对象（`{ok:true, output, exitCode, ...}`），不写 HTTP 响应；
+上表里的 `/ai/terminal/tabs` 是页面标签页，二者不要混用。
+
 ## 4. 给 AI 的工具
 
-host 插件 `plugin/dsh-plugin-android` 注册 7 个普通工具；`execute` 里用 `exec.agent.id` 作为
+host 插件 `plugin/dsh-plugin-android` 注册 8 个普通工具；`execute` 里用 `exec.agent.id` 作为
 `session`，`sessionTitle` 取会话标题（取不到就不带）。工具失败抛 `Error`（可读中文，模型能看到）。
 每个工具的 description 都写明其 capability **“若用户把 X 设为高危能力才需要确认，否则直接放行”**。
 
@@ -249,6 +268,7 @@ host 插件 `plugin/dsh-plugin-android` 注册 7 个普通工具；`execute` 里
 | `android_screenshot` | `{}` | 截屏并保存文件，返回路径与尺寸（`screenshot`，默认高危） |
 | `android_biometric` | `{reason?}` | 主动要求指纹/人脸确认；`reason` 显示为弹窗副标题（每次都会弹，不占按对话授权） |
 | `terminal_tabs` | `{action:"list"\|"open"\|"activate"\|"close", id?}` | 终端标签页（`terminal`，默认低危） |
+| `terminal` | `{action:"exec"\|"start"\|"write"\|"read"\|"close"\|"list", command?, cwd?, timeoutMs?, sessionId?, text?, enter?}` | 在沙箱里执行命令/维护独立 AI 终端会话（`terminal`，默认低危） |
 
 `android_control` 的 `params` 按 `action` 对应到：`volume` → `/android/volume`、`brightness` →
 `/android/display`、`dnd` → `/android/dnd`、`share` → `/android/share`、`open` → `/android/open`、
