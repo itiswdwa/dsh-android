@@ -4,8 +4,12 @@
  *
  *   ui status                      # 无障碍开没开、悬浮球在不在
  *   ui tree [--text]               # 当前屏幕上的可点/可输入控件（默认只列交互控件）
- *   ui click "发送"                 # 按文字点，比坐标稳
- *   ui tap 540 1200                # 按坐标点（坐标由 tree 给出）
+ *   ui where "发送"                # 自动截图 + 找到所有匹配，编号输出坐标
+ *   ui where --image /sdcard/x.png # 卷积模板匹配找图（图标/canvas/游戏）
+ *   ui where ... --pick 2 --click  # 选第 2 处点击；--tap 按坐标点，--long 长按
+ *   ui click "发送"                 # 按文字点，失败以非 0 退出（不再假报 ok）
+ *   ui tap 540 1200                # 按坐标点（坐标由 tree/where 给出）
+ *   ui shot                        # 截屏保存到 /sdcard/Download
  *   ui type "你好"                  # 往当前输入框输入
  *   ui key back|home|recents|notifications|lock
  *   ui swipe 540 1800 540 600 300  # 起点终点与时长(ms)

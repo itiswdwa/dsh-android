@@ -379,11 +379,14 @@ final class Vision {
     /** One template, one scale. */
     private static List<Hit> findOne(Screen screen, Template template, double threshold) {
         int factor = 1;
-        int maxScreen = Math.max(screen.w, screen.h);
         while (Math.max(screen.w / (factor + 1), screen.h / (factor + 1)) > 720) factor++;
-        while (factor > 1 && Math.min(template.w, template.h) / factor < 10) factor--;
+        // Keep at least a 2x reduction on a big screen: a 12px icon at factor 1
+        // means a full 3200x2092 scan for a 12x12 template, which is both slow
+        // and unnecessary. The coarse score is refined below in any case.
+        while (factor > 2 && Math.min(template.w, template.h) / factor < 10) factor--;
         Coarse coarse = screen.coarse(factor);
         Template scaled = factor == 1 ? template : template.scaled(1f / factor);
+        if (scaled.w < 3 || scaled.h < 3) return new ArrayList<Hit>();
         if (scaled.w > coarse.w || scaled.h > coarse.h) return new ArrayList<Hit>();
 
         // Scan every coarse position: a stride of 2 can step over an icon whose
