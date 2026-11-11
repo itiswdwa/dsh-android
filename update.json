@@ -15,7 +15,7 @@
     "manifest": "https://github.com/itiswdwa/dsh-android/releases/download/t3/payload.manifest"
   },
   "hot": {
-    "version": "1.2.2-t3-sp1",
+    "version": "1.2.2-t3-sp2",
     "url": "https://github.com/itiswdwa/dsh-android/releases/latest/download/dsh-hot.zip",
     "manifest": "https://raw.githubusercontent.com/itiswdwa/dsh-android/main/update.json"
   }
