@@ -12,9 +12,9 @@ set -eu
 
 : "${ANDROID_HOME:?setup-android did not export ANDROID_HOME}"
 
-ANDROID_JAR="${ANDROID_JAR:-$ANDROID_HOME/platforms/android-36/android.jar}"
-AAPT2="${AAPT2:-$ANDROID_HOME/build-tools/36.0.0/aapt2}"
-D8="${D8:-$ANDROID_HOME/build-tools/36.0.0/lib/d8.jar}"
+ANDROID_JAR="${ANDROID_JAR:-$ANDROID_HOME/platforms/android-35/android.jar}"
+AAPT2="${AAPT2:-$ANDROID_HOME/build-tools/35.0.0/aapt2}"
+D8="${D8:-$ANDROID_HOME/build-tools/35.0.0/lib/d8.jar}"
 APKSIG="${APKSIG:-/tmp/apksig.jar}"
 PROOT="${PROOT:-$PWD/build/proot/libproot.so}"
 # Cross compiler for liblinkfix.so: the guest is aarch64 and a runner is x86_64.

@@ -108,10 +108,10 @@ jobs:
           # runner image from silently producing a different dependency tree.
           node-version: "22.23.2"
 
-      - name: Android SDK（android-36 + build-tools）
+      - name: Android SDK（android-35 + build-tools）
         uses: android-actions/setup-android@v3
         with:
-          packages: "platforms;android-36 build-tools;36.0.0"
+          packages: "platforms;android-35 build-tools;35.0.0"
 
       - name: 交叉编译器 + 图标工具 + apksig（按 sha256 固定）
         run: |

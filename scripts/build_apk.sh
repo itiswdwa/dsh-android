@@ -30,7 +30,10 @@ TERMINAL_VERSION="${TERMINAL_VERSION:-$(cat "$ROOT/ROOTFS_VERSION" 2>/dev/null |
 APP="$ROOT/app"
 BUILD="$ROOT/build"
 OUT="$ROOT/out"
-ANDROID_JAR="${ANDROID_JAR:-/tmp/platform/android-36/android.jar}"
+# compileSdk 35 (Android 15): the API surface the window/taskbar code is
+# written against. targetSdk stays 28 in the manifest — that is the sandbox's
+# SELinux/exec constraint and is independent of what we compile against.
+ANDROID_JAR="${ANDROID_JAR:-/tmp/platform/android-35/android.jar}"
 AAPT2="${AAPT2:-/tmp/aapt2dir/aapt2}"
 D8="${D8:-/tmp/r8.jar}"
 APKSIG="${APKSIG:-/tmp/apksig.jar}"

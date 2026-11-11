@@ -718,6 +718,14 @@ public final class BridgeServer {
                 respondJson(out, 200, answer);
                 return;
             }
+            // Locate text in the accessibility tree or an image by convolution,
+            // and optionally act on the picked occurrence in the same request.
+            case "/a11y/where":
+                respondJson(out, 200, Assist.where(request));
+                return;
+            case "/a11y/shot":
+                respondJson(out, 200, Assist.shot(request));
+                return;
             case "/a11y/tap":
                 Assist.tap((float) request.optDouble("x", -1), (float) request.optDouble("y", -1));
                 respondJson(out, 200, ok("已点击"));
@@ -738,7 +746,8 @@ public final class BridgeServer {
                 return;
             case "/a11y/click": {
                 String label = request.optString("label", "");
-                respondJson(out, 200, ok(Assist.click(label)));
+                respondJson(out, 200, ok(Assist.click(label,
+                        request.optInt("index", 1), request.optBoolean("tap", false))));
                 return;
             }
             case "/a11y/open": {

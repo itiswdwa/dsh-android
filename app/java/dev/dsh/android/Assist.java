@@ -24,7 +24,10 @@ import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -183,11 +186,445 @@ public final class Assist extends AccessibilityService {
         return dot < 0 ? text : text.substring(dot + 1);
     }
 
+    // --------------------------------------------------------------- where
+
+    /**
+     * Find text or an image on the current screen and report screen coordinates.
+     *
+     * <p>Two independent locators, one result shape:
+     * <ul>
+     *   <li><b>text</b> walks the accessibility tree. It is exact, instant, and
+     *       yields the node itself, which is what {@code /a11y/click} wants.</li>
+     *   <li><b>image</b> does normalized cross-correlation over a screenshot
+     *       (see {@link Vision}). It is the only way to find an icon-only button,
+     *       a canvas or a WebView that exposes no text.</li>
+     * </ul>
+     *
+     * <p>When text is requested and the tree has no hit, the same convolution is
+     * used on the word rendered with the system font. That fallback is
+     * font-sensitive, so it is deliberately a fallback rather than the primary
+     * path; the caller can force it with {@code conv:true}.
+     *
+     * <p>Request keys: {@code text} or {@code image} (path), {@code exact},
+     * {@code shot} (default true), {@code save}, {@code conv}, {@code max},
+     * {@code threshold}, {@code scales}, {@code size}, {@code pick} (1-based),
+     * {@code action} (none/click/tap/long). The response has {@code matches},
+     * each with an index, a box, a centre coordinate and a score. With an action
+     * and a pick, the action is performed in this same request, so a stale screen
+     * cannot make the caller tap the wrong occurrence.
+     */
+    public static JSONObject where(JSONObject request) throws Exception {
+        String text = request.optString("text", "").trim();
+        String image = request.optString("image", "").trim();
+        boolean exact = request.optBoolean("exact", false);
+        boolean wantShot = request.optBoolean("shot", true);
+        boolean save = request.optBoolean("save", true);
+        boolean conv = request.optBoolean("conv", false);
+        int max = Math.max(1, Math.min(100, request.optInt("max", 20)));
+        double threshold = request.optDouble("threshold", 0.72);
+        if (!(threshold > 0.05 && threshold <= 1.0)) threshold = 0.72;
+        int pick = request.optInt("pick", 0);
+        String action = request.optString("action", "none").trim().toLowerCase(Locale.ROOT);
+        if (!"none".equals(action) && !"click".equals(action)
+                && !"tap".equals(action) && !"long".equals(action)) {
+            throw new IllegalArgumentException("不认识的 action：" + action + "（none/click/tap/long）");
+        }
+        if (text.isEmpty() && image.isEmpty()) {
+            throw new IllegalArgumentException("要找什么？给 text 或 image（图片路径）");
+        }
+
+        Bitmap captured = null;
+        try {
+            List<Match> matches = new ArrayList<Match>();
+            JSONObject preview = null;
+            boolean imageMode = !image.isEmpty();
+
+            if (imageMode) {
+                captured = captureBitmap();
+                Bitmap template = Vision.load(image);
+                try {
+                    Vision.Template compiled = Vision.template(template);
+                    List<Vision.Hit> hits = Vision.find(new Vision.Screen(captured), compiled,
+                            threshold, max, scales(request, compiled, captured));
+                    for (Vision.Hit hit : hits) {
+                        matches.add(Match.fromHit(hit, "image", text.isEmpty() ? image : text));
+                    }
+                } finally {
+                    template.recycle();
+                }
+            } else {
+                List<Match> textHits = findText(text, exact, max);
+                matches.addAll(textHits);
+                boolean needShot = wantShot || conv;
+                if (needShot) {
+                    captured = captureBitmap();
+                    if (conv) {
+                        // If the tree knows one occurrence, its pixels are a far
+                        // better template than any font guess: crop it and search
+                        // for visually identical copies. Only when the tree has
+                        // nothing do we render the word itself.
+                        Bitmap seed = null;
+                        Rect box = textHits.isEmpty() ? null : textHits.get(0).box;
+                        if (box != null && box.width() >= 8 && box.height() >= 8) {
+                            int left = Math.max(0, box.left);
+                            int top = Math.max(0, box.top);
+                            int right = Math.min(captured.getWidth(), box.right);
+                            int bottom = Math.min(captured.getHeight(), box.bottom);
+                            if (right - left >= 8 && bottom - top >= 8) {
+                                try {
+                                    seed = Bitmap.createBitmap(captured, left, top,
+                                            right - left, bottom - top);
+                                } catch (Throwable ignored) {
+                                    seed = null;
+                                }
+                            }
+                        }
+                        if (seed != null) {
+                            try {
+                                Vision.Template compiled = Vision.template(seed);
+                                List<Vision.Hit> hits = Vision.find(new Vision.Screen(captured),
+                                        compiled, Math.max(threshold, 0.80), max, new float[]{1f});
+                                for (Vision.Hit hit : hits) {
+                                    matches.add(Match.fromHit(hit, "text-conv", text));
+                                }
+                            } finally {
+                                seed.recycle();
+                            }
+                        } else {
+                            Vision.Screen screen = new Vision.Screen(captured);
+                            for (float size : sizes(request)) {
+                                for (Vision.Template compiled : Vision.renderText(text, size)) {
+                                    List<Vision.Hit> hits = Vision.find(screen, compiled,
+                                            Math.max(threshold, 0.78), max, new float[]{1f});
+                                    for (Vision.Hit hit : hits) {
+                                        matches.add(Match.fromHit(hit, "text-conv", text));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            matches = dedupe(matches, max);
+            sortReadingOrder(matches);
+            if (matches.size() > max) {
+                matches = new ArrayList<Match>(matches.subList(0, max));
+            }
+
+            if (wantShot && save && captured != null) {
+                preview = ShotStore.saveBitmap(captured, 75, "dsh-where");
+            }
+
+            int selected = 0;
+            boolean acted = false;
+            String message = "";
+            if (!"none".equals(action)) {
+                if (matches.isEmpty()) throw new IllegalStateException("没有找到可操作的目标");
+                if (pick <= 0) {
+                    if (matches.size() != 1) {
+                        throw new IllegalArgumentException("找到 " + matches.size()
+                                + " 处，请用 pick 指定第几处（1 起）");
+                    }
+                    pick = 1;
+                }
+                if (pick > matches.size()) {
+                    throw new IllegalArgumentException("pick 超出范围：只有 " + matches.size() + " 处");
+                }
+                Match match = matches.get(pick - 1);
+                selected = pick;
+                if ("click".equals(action) && match.node != null) {
+                    AccessibilityNodeInfo target = clickable(match.node);
+                    boolean clicked = false;
+                    if (target != null && !tooLarge(target)) {
+                        clicked = target.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                    }
+                    if (!clicked) tap(match.centerX(), match.centerY());
+                    message = (clicked ? "clicked " : "clicked (tap) ") + match.label()
+                            + " @" + match.centerX() + "," + match.centerY();
+                } else if ("long".equals(action)) {
+                    longPress(match.centerX(), match.centerY());
+                    message = "long-pressed " + match.label()
+                            + " @" + match.centerX() + "," + match.centerY();
+                } else {
+                    tap(match.centerX(), match.centerY());
+                    message = "tapped " + match.label()
+                            + " @" + match.centerX() + "," + match.centerY();
+                }
+                acted = true;
+            } else if (matches.isEmpty()) {
+                message = "没有找到" + (imageMode ? "图片" : "「" + text + "」");
+            } else {
+                message = "找到 " + matches.size() + " 处";
+            }
+
+            JSONObject answer = new JSONObject();
+            answer.put("ok", true);
+            answer.put("kind", imageMode ? "image" : "text");
+            answer.put("query", imageMode ? image : text);
+            answer.put("count", matches.size());
+            JSONArray array = new JSONArray();
+            for (int i = 0; i < matches.size(); i++) {
+                array.put(matches.get(i).toJson(i + 1));
+            }
+            answer.put("matches", array);
+            if (preview != null) answer.put("screenshot", preview);
+            if (selected > 0) answer.put("selected", selected);
+            if (acted) answer.put("acted", true);
+            answer.put("action", action);
+            if (!message.isEmpty()) answer.put("message", message);
+            return answer;
+        } finally {
+            if (captured != null) captured.recycle();
+        }
+    }
+
+    // --------------------------------------------------------------- shot
+
+    /** Capture the screen and save it to Download; returns the file path. */
+    public static JSONObject shot(JSONObject request) throws Exception {
+        Bitmap captured = captureBitmap();
+        try {
+            return ShotStore.saveBitmap(captured, request.optInt("quality", 85), "dsh-shot");
+        } finally {
+            captured.recycle();
+        }
+    }
+
+    // --------------------------------------------------------------- matches
+
+    private static final class NodeHit {
+        final AccessibilityNodeInfo node;
+        final String text;
+        final String className;
+        final Rect box;
+        final boolean exact;
+        final boolean clickable;
+
+        NodeHit(AccessibilityNodeInfo node, String text, String className, Rect box,
+                boolean exact, boolean clickable) {
+            this.node = node;
+            this.text = text;
+            this.className = className;
+            this.box = box;
+            this.exact = exact;
+            this.clickable = clickable;
+        }
+    }
+
+    private static final class Match {
+        final AccessibilityNodeInfo node;
+        final String text;
+        final String className;
+        final Rect box;
+        final double score;
+        final String source;
+        final boolean exact;
+        final boolean clickable;
+        final boolean visual;
+
+        Match(AccessibilityNodeInfo node, String text, String className, Rect box,
+                double score, String source, boolean exact, boolean clickable, boolean visual) {
+            this.node = node;
+            this.text = text;
+            this.className = className;
+            this.box = box;
+            this.score = score;
+            this.source = source;
+            this.exact = exact;
+            this.clickable = clickable;
+            this.visual = visual;
+        }
+
+        static Match fromNode(NodeHit hit) {
+            return new Match(hit.node, hit.text, hit.className, hit.box, 1.0,
+                    "a11y", hit.exact, hit.clickable, false);
+        }
+
+        static Match fromHit(Vision.Hit hit, String source, String text) {
+            return new Match(null, text, "Image", new Rect(hit.x, hit.y,
+                    hit.x + hit.w, hit.y + hit.h), hit.score, source, false, false, true);
+        }
+
+        int centerX() {
+            return box.centerX();
+        }
+
+        int centerY() {
+            return box.centerY();
+        }
+
+        String label() {
+            return text == null || text.isEmpty() ? "目标" : text;
+        }
+
+        JSONObject toJson(int index) throws Exception {
+            JSONObject row = new JSONObject();
+            row.put("index", index);
+            row.put("source", source);
+            if (text != null && !text.isEmpty()) row.put("text", text);
+            if (className != null && !className.isEmpty()) row.put("class", className);
+            row.put("box", new JSONArray(new int[]{box.left, box.top, box.right, box.bottom}));
+            row.put("at", new JSONArray(new int[]{centerX(), centerY()}));
+            row.put("x", centerX());
+            row.put("y", centerY());
+            row.put("score", Math.round(score * 1000d) / 1000d);
+            row.put("clickable", clickable);
+            row.put("exact", exact);
+            return row;
+        }
+    }
+
+    /** Accessibility-tree text search. The caller gets every hit, in reading order. */
+    private static List<Match> findText(String query, boolean exact, int max) throws Exception {
+        AccessibilityNodeInfo root = require().getRootInActiveWindow();
+        if (root == null) {
+            throw new IllegalStateException("当前没有可读的窗口（锁屏或系统界面？）");
+        }
+        List<NodeHit> found = new ArrayList<NodeHit>();
+        collectText(root, query, exact, found, 0, new int[]{900});
+        List<Match> matches = new ArrayList<Match>();
+        for (NodeHit hit : found) matches.add(Match.fromNode(hit));
+        matches = dedupe(matches, Math.max(max, 1));
+        sortReadingOrder(matches);
+        if (matches.size() > max) {
+            matches = new ArrayList<Match>(matches.subList(0, max));
+        }
+        return matches;
+    }
+
+    private static void collectText(AccessibilityNodeInfo node, String query, boolean exact,
+            List<NodeHit> out, int depth, int[] budget) {
+        if (node == null || depth > 32 || budget[0] <= 0) return;
+        budget[0]--;
+        String value = text(node);
+        if (value != null && !value.isEmpty() && textMatches(value, query, exact)) {
+            Rect box = new Rect();
+            node.getBoundsInScreen(box);
+            if (box.width() > 0 && box.height() > 0 && onScreen(box)) {
+                AccessibilityNodeInfo target = clickable(node);
+                out.add(new NodeHit(node, value, shortClass(node.getClassName()), box,
+                        value.equalsIgnoreCase(query), target != null));
+            }
+        }
+        for (int index = 0; index < node.getChildCount(); index++) {
+            collectText(node.getChild(index), query, exact, out, depth + 1, budget);
+        }
+    }
+
+    private static boolean textMatches(String value, String query, boolean exact) {
+        if (exact) return value.equalsIgnoreCase(query);
+        return value.toLowerCase(Locale.ROOT).contains(query.toLowerCase(Locale.ROOT));
+    }
+
+    private static boolean onScreen(Rect box) {
+        try {
+            android.util.DisplayMetrics metrics = App.i().getResources().getDisplayMetrics();
+            return box.right > 0 && box.bottom > 0
+                    && box.left < metrics.widthPixels && box.top < metrics.heightPixels;
+        } catch (Throwable ignored) {
+            return true;
+        }
+    }
+
+    private static boolean tooLarge(AccessibilityNodeInfo node) {
+        try {
+            Rect box = new Rect();
+            node.getBoundsInScreen(box);
+            android.util.DisplayMetrics metrics = App.i().getResources().getDisplayMetrics();
+            long area = (long) box.width() * box.height();
+            long screen = (long) metrics.widthPixels * metrics.heightPixels;
+            return area * 5 > screen * 3;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static List<Match> dedupe(List<Match> input, int max) {
+        List<Match> sorted = new ArrayList<Match>(input);
+        Collections.sort(sorted, new Comparator<Match>() {
+            @Override
+            public int compare(Match a, Match b) {
+                if (a.visual != b.visual) return a.visual ? 1 : -1; // tree hits first
+                return Double.compare(b.score, a.score);
+            }
+        });
+        List<Match> kept = new ArrayList<Match>();
+        for (Match match : sorted) {
+            boolean duplicate = false;
+            for (Match other : kept) {
+                int minW = Math.min(match.box.width(), other.box.width());
+                int minH = Math.min(match.box.height(), other.box.height());
+                int dx = Math.abs(match.centerX() - other.centerX());
+                int dy = Math.abs(match.centerY() - other.centerY());
+                if (dx < Math.max(8, minW / 2) && dy < Math.max(8, minH / 2)) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) {
+                kept.add(match);
+                if (kept.size() >= max * 2) break;
+            }
+        }
+        return kept;
+    }
+
+    private static void sortReadingOrder(List<Match> matches) {
+        Collections.sort(matches, new Comparator<Match>() {
+            @Override
+            public int compare(Match a, Match b) {
+                int tolerance = Math.max(12, Math.min(a.box.height(), b.box.height()) / 2);
+                int dy = a.box.top - b.box.top;
+                if (Math.abs(dy) > tolerance) return dy;
+                int dx = a.box.left - b.box.left;
+                if (dx != 0) return dx;
+                if (a.exact != b.exact) return a.exact ? -1 : 1;
+                return Double.compare(b.score, a.score);
+            }
+        });
+    }
+
+    private static float[] scales(JSONObject request, Vision.Template template, Bitmap screen) {
+        JSONArray requested = request.optJSONArray("scales");
+        if (requested != null && requested.length() > 0) {
+            float[] values = new float[requested.length()];
+            for (int i = 0; i < requested.length(); i++) {
+                float value = (float) requested.optDouble(i, 1.0);
+                values[i] = value > 0.05f ? value : 1.0f;
+            }
+            return values;
+        }
+        List<Float> values = new ArrayList<Float>();
+        values.add(1f);
+        if (template.w > screen.getWidth() || template.h > screen.getHeight()) {
+            values.add(0.5f);
+            values.add(0.33f);
+            values.add(0.25f);
+        }
+        float[] out = new float[values.size()];
+        for (int i = 0; i < out.length; i++) out[i] = values.get(i);
+        return out;
+    }
+
+    private static float[] sizes(JSONObject request) {
+        int size = request.optInt("size", 0);
+        if (size > 0) return new float[]{size};
+        return new float[]{28f, 36f, 44f};
+    }
+
     /** One touch. Coordinates are screen pixels, as reported by {@link #describe}. */
     public static void tap(final float x, final float y) throws Exception {
         Path path = new Path();
         path.moveTo(x, y);
         stroke(path, 0, 60);
+    }
+
+    /** A long press at one point (context menus, drag handles). */
+    public static void longPress(final float x, final float y) throws Exception {
+        Path path = new Path();
+        path.moveTo(x, y);
+        stroke(path, 0, 650);
     }
 
     /** A drag from one point to another over {@code ms} milliseconds. */
@@ -274,18 +711,50 @@ public final class Assist extends AccessibilityService {
         }
     }
 
-    /** Click the node whose text/label matches, so no coordinates are needed. */
+    /** Click the first node whose text/label matches (legacy helper). */
     public static String click(String label) throws Exception {
+        return click(label, 1, false);
+    }
+
+    /**
+     * Click the {@code index}-th text match (1-based), with a coordinate tap as
+     * the fallback.
+     *
+     * <p>This replaces the old "first node whose text contains the label, walk up
+     * to something clickable" shortcut, which is why {@code ui click "发送"} used
+     * to report success while doing nothing: it could land on a chat message that
+     * merely contained the word, or on a non-clickable node. Matching is now
+     * ranked (exact before contains, clickable before not), every occurrence is
+     * available, and when {@code ACTION_CLICK} is refused the node's own centre is
+     * tapped through the gesture API — which is what a real finger does.
+     */
+    public static String click(String label, int index, boolean tapOnly) throws Exception {
         if (label == null || label.isEmpty()) throw new IllegalArgumentException("要点哪个？（按文字匹配）");
-        AccessibilityNodeInfo root = require().getRootInActiveWindow();
-        AccessibilityNodeInfo hit = findLabel(root, label, 0, new int[]{MAX_NODES});
-        if (hit == null) throw new IllegalStateException("屏幕上没有找到「" + label + "」");
-        AccessibilityNodeInfo target = clickable(hit);
-        if (target == null) throw new IllegalStateException("「" + label + "」不能点击");
-        if (!target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-            throw new IllegalStateException("「" + label + "」拒绝了点击");
+        List<Match> hits = findText(label, false, 100);
+        if (hits.isEmpty()) throw new IllegalStateException("屏幕上没有找到「" + label + "」");
+        List<Match> ranked = new ArrayList<Match>(hits);
+        Collections.sort(ranked, new Comparator<Match>() {
+            @Override
+            public int compare(Match a, Match b) {
+                if (a.exact != b.exact) return a.exact ? -1 : 1;
+                if (a.clickable != b.clickable) return a.clickable ? -1 : 1;
+                return 0;
+            }
+        });
+        int pick = index <= 0 ? 1 : index;
+        if (pick > ranked.size()) {
+            throw new IllegalStateException("只有 " + ranked.size() + " 处「" + label + "」，没有第 " + pick + " 处");
         }
-        return "clicked " + label;
+        Match match = ranked.get(pick - 1);
+        if (!tapOnly && match.node != null) {
+            AccessibilityNodeInfo target = clickable(match.node);
+            if (target != null && !tooLarge(target)
+                    && target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                return "clicked " + match.label() + " @" + match.centerX() + "," + match.centerY();
+            }
+        }
+        tap(match.centerX(), match.centerY());
+        return "tapped " + match.label() + " @" + match.centerX() + "," + match.centerY();
     }
 
     private static AccessibilityNodeInfo clickable(AccessibilityNodeInfo node) {
@@ -400,18 +869,14 @@ public final class Assist extends AccessibilityService {
     }
 
     /**
-     * Screen capture through the accessibility service (API 30+).
+     * Capture the screen as an ARGB_8888 bitmap (API 30+).
      *
      * <p>The bitmap arrives on a binder callback and must be copied off its
      * {@link HardwareBuffer} before that buffer is closed — the wrapper is only
-     * valid while the buffer is open. Everything after that is plain Bitmap
-     * work: scale into the caller's budget, JPEG, base64. The caller is usually a
-     * model, so the default size is deliberately modest. Both the capture and the
-     * scaled copy are recycled before returning so repeated screenshots do not
-     * pile up bitmaps.
+     * valid while the buffer is open. The caller owns the returned bitmap and
+     * must recycle it; this method never keeps a reference.
      */
-    public static JSONObject screenshot(final int quality, final int maxWidth, final int maxHeight)
-            throws Exception {
+    static Bitmap captureBitmap() throws Exception {
         if (android.os.Build.VERSION.SDK_INT < 30) {
             throw new ScreenshotFailure(0, "截屏需要 Android 11（API 30）及以上");
         }
@@ -419,7 +884,6 @@ public final class Assist extends AccessibilityService {
         final CountDownLatch latch = new CountDownLatch(1);
         final Bitmap[] bitmap = new Bitmap[1];
         final Throwable[] failure = new Throwable[1];
-        final long started = android.os.SystemClock.elapsedRealtime();
         try {
             service.takeScreenshot(Display.DEFAULT_DISPLAY, new Executor() {
                 @Override
@@ -472,7 +936,21 @@ public final class Assist extends AccessibilityService {
         }
         Bitmap captured = bitmap[0];
         if (captured == null) throw new ScreenshotFailure(0, "截屏没有返回图像");
+        return captured;
+    }
 
+    /**
+     * Screen capture for the callers that want JPEG + base64 (the Android API and
+     * the model-facing screenshot endpoint).
+     *
+     * <p>The default size is deliberately modest; both the capture and the scaled
+     * copy are recycled before returning so repeated screenshots do not pile up
+     * bitmaps.
+     */
+    public static JSONObject screenshot(final int quality, final int maxWidth, final int maxHeight)
+            throws Exception {
+        final long started = android.os.SystemClock.elapsedRealtime();
+        Bitmap captured = captureBitmap();
         Bitmap output = captured;
         try {
             float scale = Math.min(1f, Math.min(maxWidth / (float) captured.getWidth(),

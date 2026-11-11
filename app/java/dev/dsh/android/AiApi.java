@@ -3,8 +3,6 @@ package dev.dsh.android;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.util.Locale;
 
 /**
@@ -24,14 +22,6 @@ import java.util.Locale;
  * nothing throws out of {@link #handle}.
  */
 public final class AiApi {
-
-    /** Keep only the newest screenshots so repeated AI captures do not fill Download. */
-    private static final int MAX_SCREENSHOTS = 20;
-
-    /** Disambiguates two captures that finish in the same millisecond. */
-    private static final java.util.concurrent.atomic.AtomicInteger SHOT_SEQUENCE =
-            new java.util.concurrent.atomic.AtomicInteger();
-    private static final Object SHOT_LOCK = new Object();
 
     private AiApi() {
     }
@@ -283,7 +273,7 @@ public final class AiApi {
      * decodes it to {@code Download/dsh-shot-<ts>-<seq>.jpg} on shared storage and
      * replaces it with the file path the guest can open at {@code /sdcard/...}.
      * The sequence suffix keeps concurrent same-millisecond captures apart, and
-     * only the newest {@link #MAX_SCREENSHOTS} are kept.
+     * only the newest 20 are kept.
      */
     private static JSONObject saveScreenshot(JSONObject captured) {
         String encoded = captured.optString("image", "");
@@ -296,99 +286,21 @@ public final class AiApi {
             putCapability(failure, "screenshot");
             return failure;
         }
-
-        File shared;
-        try {
-            shared = App.i().sharedStorage();
-        } catch (Throwable error) {
-            shared = null;
+        JSONObject saved = ShotStore.saveJpeg(jpeg, captured.optInt("width", 0),
+                captured.optInt("height", 0), "dsh-shot");
+        if (!saved.optBoolean("ok", false)) {
+            putCapability(saved, "screenshot");
+            return saved;
         }
-        if (shared == null) {
-            JSONObject failure = failure("截屏成功，但共享存储不可用，无法保存到 Download",
-                    "在 设置 → 安卓沙箱 → 权限 里允许存储，并打开共享存储");
-            putCapability(failure, "screenshot");
-            return failure;
-        }
-
-        File directory = new File(shared, "Download");
-        if (!directory.isDirectory() && !directory.mkdirs() && !directory.isDirectory()) {
-            JSONObject failure = failure("截屏成功，但无法创建共享存储的 Download 目录",
-                    "检查应用存储权限，或手动创建 /sdcard/Download");
-            putCapability(failure, "screenshot");
-            return failure;
-        }
-
-        // Two concurrent screenshots must not overwrite each other when they land
-        // in the same millisecond: the sequence is part of the file name.
-        File file;
-        synchronized (SHOT_LOCK) {
-            long now = System.currentTimeMillis();
-            do {
-                file = new File(directory, "dsh-shot-" + now + "-"
-                        + SHOT_SEQUENCE.incrementAndGet() + ".jpg");
-            } while (file.exists());
-        }
-        try {
-            FileOutputStream out = new FileOutputStream(file);
-            try {
-                out.write(jpeg);
-                out.flush();
-            } finally {
-                out.close();
-            }
-        } catch (Throwable error) {
-            JSONObject failure = failure("截屏成功，但写入 Download 失败：" + error,
-                    "检查应用存储权限，或换一个共享存储目录");
-            putCapability(failure, "screenshot");
-            return failure;
-        }
-        // Best effort: keep the newest MAX_SCREENSHOTS, silently ignore failures.
-        pruneScreenshots(directory);
-
         try {
             captured.remove("image");
-            captured.put("file", "/sdcard/Download/" + file.getName());
-            captured.put("bytes", jpeg.length);
+            captured.put("file", saved.optString("file", ""));
+            captured.put("bytes", saved.optInt("bytes", jpeg.length));
             return captured;
         } catch (Throwable error) {
             JSONObject failure = failure("截屏已保存，但无法组装响应：" + error, null);
             putCapability(failure, "screenshot");
             return failure;
-        }
-    }
-
-    /**
-     * Drop the oldest {@code dsh-shot-*.jpg} files beyond {@link #MAX_SCREENSHOTS}.
-     * Only this app's own captures are touched, and any failure (permission, race)
-     * is ignored — the screenshot the caller asked for is already saved.
-     */
-    private static void pruneScreenshots(File directory) {
-        try {
-            File[] entries = directory.listFiles();
-            if (entries == null) return;
-            java.util.List<File> shots = new java.util.ArrayList<File>();
-            for (File entry : entries) {
-                if (entry == null || !entry.isFile()) continue;
-                String name = entry.getName();
-                if (name.startsWith("dsh-shot-") && name.endsWith(".jpg")) shots.add(entry);
-            }
-            if (shots.size() <= MAX_SCREENSHOTS) return;
-            java.util.Collections.sort(shots, new java.util.Comparator<File>() {
-                @Override
-                public int compare(File left, File right) {
-                    long a = left.lastModified();
-                    long b = right.lastModified();
-                    if (a != b) return a > b ? -1 : 1; // newest first
-                    return right.getName().compareTo(left.getName());
-                }
-            });
-            for (int i = MAX_SCREENSHOTS; i < shots.size(); i++) {
-                try {
-                    shots.get(i).delete();
-                } catch (Throwable ignored) {
-                }
-            }
-        } catch (Throwable ignored) {
         }
     }
 

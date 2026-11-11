@@ -64,6 +64,65 @@ function fail(message) {
   process.exit(1);
 }
 
+/** Every bridge action reports {ok,message} or {ok:false,error}; never hide the failure. */
+function done(data, fallback = "ok") {
+  if (!data || data.ok !== true) {
+    fail((data && (data.error || data.message)) || fallback);
+  }
+  console.log(data.message ?? fallback);
+  return data;
+}
+
+function number(value, name) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) fail(name + " 要是数字（收到 " + value + "）");
+  return parsed;
+}
+
+function parseArgs(argv, withValue, switches) {
+  const rest = [];
+  const values = {};
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (withValue.includes(arg)) {
+      const value = argv[++i];
+      if (value === undefined) fail(arg + " 缺少值");
+      if (values[arg] !== undefined) values[arg] = [].concat(values[arg], value);
+      else values[arg] = value;
+    } else if (switches.includes(arg)) {
+      values[arg] = true;
+    } else if (arg.startsWith("--")) {
+      fail("不认识的选项 " + arg);
+    } else {
+      rest.push(arg);
+    }
+  }
+  return { rest, values };
+}
+
+function renderWhere(data) {
+  if (!data || data.ok !== true) fail((data && data.error) || "查找失败");
+  const shot = data.screenshot && data.screenshot.file ? "，截图 " + data.screenshot.file : "";
+  const lines = ["# 找到 " + data.count + " 处" + (data.kind === "image" ? "图片" : "「" + data.query + "」") + shot];
+  for (const match of data.matches ?? []) {
+    const box = (match.box ?? []).join(",");
+    const parts = ["  " + match.index + ". [x=" + match.x + ",y=" + match.y + "] box=[" + box + "]"];
+    if (match.class) parts.push(match.class);
+    if (match.text) parts.push(JSON.stringify(match.text));
+    parts.push(match.source || "");
+    parts.push("score=" + match.score);
+    if (match.clickable) parts.push("clickable");
+    if (match.exact) parts.push("exact");
+    lines.push(parts.filter(Boolean).join(" "));
+  }
+  if (data.message && !data.message.startsWith("找到 ")) lines.push(data.message);
+  if (data.count > 0 && !data.acted) {
+    const action = data.kind === "image" ? "--tap" : "--click";
+    lines.push("提示：ui where ... --pick 1 " + action + "（换序号选别处；--tap 永远按坐标点）");
+  }
+  return lines.join("\n");
+}
+
 /** Nodes the model can act on, one per line: what it is, where, what it can do. */
 function renderTree(data) {
   if (data.ok !== true) fail(data.error || "读不到屏幕");
@@ -103,22 +162,30 @@ async function main() {
       return;
     case "tap": {
       const [x, y] = rest.map(Number);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) fail("用法：ui tap <x> <y>（坐标从 ui tree 里取）");
-      console.log((await call("/a11y/tap", { x, y })).message ?? "ok");
+      if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) {
+        fail("用法：ui tap <x> <y>（坐标从 ui tree / ui where 里取）");
+      }
+      done(await call("/a11y/tap", { x, y }), "已点击");
       return;
     }
     case "click": {
-      if (!rest.length) fail('用法：ui click "<控件上的文字>"');
-      console.log((await call("/a11y/click", { label: rest.join(" ") })).message ?? "ok");
+      const parsed = parseArgs(rest, ["--index"], ["--tap"]);
+      if (!parsed.rest.length) fail('用法：ui click "<控件上的文字>" [--index N] [--tap]');
+      const index = parsed.values["--index"] ? number(parsed.values["--index"], "--index") : 1;
+      done(await call("/a11y/click", {
+        label: parsed.rest.join(" "),
+        index,
+        tap: !!parsed.values["--tap"],
+      }));
       return;
     }
     case "type": {
       if (!rest.length) fail('用法：ui type "<要输入的内容>"');
-      console.log((await call("/a11y/type", { text: rest.join(" ") })).message ?? "ok");
+      done(await call("/a11y/type", { text: rest.join(" ") }), "已输入");
       return;
     }
     case "key": {
-      console.log((await call("/a11y/key", { name: rest[0] ?? "" })).message ?? "ok");
+      done(await call("/a11y/key", { name: rest[0] ?? "" }), "已发送");
       return;
     }
     case "swipe": {
@@ -126,23 +193,71 @@ async function main() {
       if ([x1, y1, x2, y2].some((value) => !Number.isFinite(value))) {
         fail("用法：ui swipe <x1> <y1> <x2> <y2> [ms]");
       }
-      console.log((await call("/a11y/swipe", { x1, y1, x2, y2, ms: Number.isFinite(ms) ? ms : 300 })).message ?? "ok");
+      done(await call("/a11y/swipe", { x1, y1, x2, y2, ms: Number.isFinite(ms) ? ms : 300 }), "已滑动");
       return;
     }
     case "open": {
       if (!rest.length) fail('用法：ui open "<应用名或包名>"');
-      console.log((await call("/a11y/open", { app: rest.join(" ") })).message ?? "ok");
+      done(await call("/a11y/open", { app: rest.join(" ") }), "已启动");
       return;
     }
     case "ball": {
-      console.log((await call(rest[0] === "stop" ? "/ball/stop" : "/ball/start", {})).message ?? "ok");
+      done(await call(rest[0] === "stop" ? "/ball/stop" : "/ball/start", {}), "已切换悬浮球");
       return;
     }
     case "permission": {
       const which = rest[0];
       const path = which === "overlay" ? "/overlay/request"
         : which === "mic" ? "/mic/request" : "/a11y/request";
-      console.log((await call(path, {})).message ?? "ok");
+      done(await call(path, {}), "已请求授权");
+      return;
+    }
+    case "where": {
+      const parsed = parseArgs(rest,
+        ["--image", "--pick", "--max", "--threshold", "--size", "--scale", "--action"],
+        ["--exact", "--conv", "--no-shot", "--no-save", "--click", "--tap", "--long", "--json"]);
+      const text = parsed.rest.join(" ").trim();
+      const image = parsed.values["--image"] ? String(parsed.values["--image"]).trim() : "";
+      if (!text && !image) fail('用法：ui where "文字" [--pick N --click] 或 ui where --image <模板图片>');
+      if (text && image) fail("文字和图片只能选一个（--image 或文字）");
+      const body = {};
+      if (image) body.image = image;
+      else body.text = text;
+      if (parsed.values["--exact"]) body.exact = true;
+      if (parsed.values["--conv"]) body.conv = true;
+      if (parsed.values["--no-shot"]) body.shot = false;
+      if (parsed.values["--no-save"]) body.save = false;
+      if (parsed.values["--pick"]) body.pick = number(parsed.values["--pick"], "--pick");
+      if (parsed.values["--max"]) body.max = number(parsed.values["--max"], "--max");
+      if (parsed.values["--threshold"]) body.threshold = number(parsed.values["--threshold"], "--threshold");
+      if (parsed.values["--size"]) body.size = number(parsed.values["--size"], "--size");
+      if (parsed.values["--scale"]) {
+        body.scales = [].concat(parsed.values["--scale"]).join(",").split(",")
+          .map((value) => number(value, "--scale"));
+      }
+      if (parsed.values["--click"]) body.action = "click";
+      else if (parsed.values["--tap"]) body.action = "tap";
+      else if (parsed.values["--long"]) body.action = "long";
+      else if (parsed.values["--action"]) body.action = String(parsed.values["--action"]);
+      const data = await call("/a11y/where", body);
+      if (parsed.values["--json"]) {
+        console.log(JSON.stringify(data, null, 2));
+        return;
+      }
+      console.log(renderWhere(data));
+      return;
+    }
+    case "shot": {
+      const parsed = parseArgs(rest, ["--quality"], ["--json"]);
+      const body = {};
+      if (parsed.values["--quality"]) body.quality = number(parsed.values["--quality"], "--quality");
+      const data = await call("/a11y/shot", body);
+      if (parsed.values["--json"]) {
+        console.log(JSON.stringify(data, null, 2));
+        return;
+      }
+      if (!data || data.ok !== true) fail((data && (data.error || data.message)) || "截屏失败");
+      console.log(data.file || "已截屏");
       return;
     }
     default:
@@ -150,12 +265,16 @@ async function main() {
 
   ui status                      当前状态（服务/悬浮窗/麦克风/屏幕尺寸）
   ui tree [--text]               屏幕上的控件；--text 连纯文本一起列
-  ui click "发送"                 按文字点（推荐）
-  ui tap X Y                     按坐标点
+  ui where "发送"                 自动截图 + 找到所有出现位置，按从上到下编号
+  ui where --image /sdcard/x.png  卷积模板匹配找图（图标/canvas/游戏）
+  ui where "发送" --pick 2 --click  选第 2 处点击（失败会按坐标点）
+  ui click "发送" [--index N]     按文字点（默认第 1 处；--tap 直接按坐标）
+  ui tap X Y                     按坐标点（坐标从 tree/where 取）
   ui type "内容"                  输入到当前输入框
   ui key <back|home|recents|notifications|lock>
   ui swipe X1 Y1 X2 Y2 [ms]      滑动
   ui open "微信"                  启动应用
+  ui shot [--json]               截屏并保存到 /sdcard/Download
   ui ball start|stop             悬浮球开关
   ui permission [a11y|overlay|mic]  让应用弹出相应的授权页`);
   }

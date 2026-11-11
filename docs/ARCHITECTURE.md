@@ -82,6 +82,8 @@ rootfs 里那份 `/root` 会被完全遮住，技能和指令只有写进 bind �
 | `GET /recovery/status` | 恢复模式状态：是否启用、实时令牌、局域网地址、三套连接命令 |
 | `POST /recovery/start\|stop` | 进入/退出恢复模式（换 guest 入口脚本，因此要重启沙箱） |
 | `POST /recovery/token` | 换一个新令牌（密码在 guest 的 shadow 里，重启恢复模式后生效） |
+| `POST /a11y/where` | 找文字（无障碍树）或图片（多尺度卷积模板匹配），按从上到下编号返回坐标；可 `pick` + `action` 在同一次请求里点击/长按（`ui where` 走这里） |
+| `POST /a11y/shot` | 截屏并保存到 `Download/dsh-shot-*.jpg`，返回文件路径（`ui shot` 走这里） |
 
 （表里只列了主要端点；`/ball/*`、`/a11y/*`、`/haptic`、`/hot/*`、`/snapshot` 的完整字段见
 `BridgeServer.java` 与 `plugin/` 的客户端。）

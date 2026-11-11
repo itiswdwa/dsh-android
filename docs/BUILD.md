@@ -15,6 +15,9 @@
 
 路径都写在 `scripts/build_apk.sh` 顶部（`ANDROID_JAR` / `AAPT2` / `D8` / `APKSIG`），按自己的环境改。
 
+默认编译目标是 **Android 15（API 35，`android-35/android.jar`）**；manifest 里的 `targetSdkVersion`
+仍是 **28** —— 这是沙箱能在 app 私有目录里 exec PRoot/node 的硬约束，不要为了“用新 API”去动它。
+
 ## 三步
 
 ```sh

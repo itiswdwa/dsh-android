@@ -31,7 +31,7 @@
 `window.DshAndroid.version` 在 `1.2.2` 从 `1` 升到 `2`——老版本只保证 `base`/`token`/`pty`，
 新插件应该先看 `version >= 2`（或先请求 `/android`）再使用下面的端点。它描述的是 `/android/*`
 这层接口面，**仍是 `2`**；要判断这台设备有没有 `1.2.2` 的全部新端点（生物识别、`/ai/*`），看
-`GET /android/info` 的 `app.versionCode`（本版 `10217`），或直接探测路径（404 = 没有）。
+`GET /android/info` 的 `app.versionCode`（本版 `10218`），或直接探测路径（404 = 没有）。
 
 ### 通用响应
 
@@ -127,9 +127,9 @@ curl -s -X POST -H "X-Dsh-Token: $DSH_ANDROID_BRIDGE_TOKEN" \
   "app": {
     "package": "dev.dsh.android",
     "version": "1.2.2",
-    "versionCode": 10217,
+    "versionCode": 10218,
     "terminal": "3",
-    "hot": "1.2.2-t3-sp0"
+    "hot": "1.2.2-t3-sp2"
   },
   "device": {
     "brand": "Xiaomi", "manufacturer": "Xiaomi", "model": "25091RP04C",
@@ -546,6 +546,8 @@ POST /android/apps { "action": "launch", "package": "com.tencent.mm" }
 
 ## 7. 变更记录
 
+- `1.2.2`（`versionCode` 10218，10217 / 10216 / 10215 作废）：`/android/*` 契约未变；本次只改了
+  agent `ui` 工具与编译 API（compileSdk 35，targetSdk 仍 28），以及导航栏分隔线跟随主题。
 - `1.2.2`（`versionCode` 10217，10216 / 10215 作废）：新增 `/android`、`/android/info`、`/android/permissions`、
   `/android/clipboard`、`/android/toast`、`/android/vibrate`、`/android/notify`、
   `/android/notify/cancel`、`/android/volume`、`/android/display`、`/android/dnd`、`/android/apps`、

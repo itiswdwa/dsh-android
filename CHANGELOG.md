@@ -94,6 +94,23 @@ _热包，不换 APK。这一版把 AI 的「终端」能力从“只能开/关�
 
 ### 修订
 
+- **2026-11-11：10218 重发（版本名仍是 `1.2.2`，`versionCode` 10217 → 10218，旧 10217 作废）。**
+  这一版把 agent 的 `ui` 从“按文字点一下”补成“先找到、再选序号、再点”：
+  `ui where "文字"` 走无障碍树列出**所有**匹配（按从上到下、从左到右编号，带坐标与控件信息），
+  `ui where --image /sdcard/icon.png` 用多尺度零均值归一化互相关（卷积模板匹配）找图标/图片，
+  支持自动截图、`--pick N` 和 `--click/--tap/--long`；新增 `ui shot` 截屏到 Download。
+  **`ui where` 与 `ui click` 不再把桥的 `{ok:false,error}` 吞成 “ok”**：找不到、越界、被系统拒绝
+  都会以非 0 退出并打印原因；`ui click` 也改成“精确 > 包含、可点 > 不可点”排序，并在
+  `ACTION_CLICK` 被拒时按控件中心真实点一下。文字在无障碍树里没有时，才用系统字体渲染查询词做卷积兜底
+  （字体不一致时可能漏，优先给 `--image` 模板）。截图默认保存到
+  `Download/dsh-where-*.jpg`，与 AI 截屏一样只留最近 20 张。
+- **构建改用 Android 15 的 API 35（`compileSdk 35`），`targetSdk` 仍是 28。**
+  这里要区分两件事：`compileSdk` 只是编译期可用的 API 面；运行时行为由 `targetSdk` 决定，
+  而 28 是沙箱能在 app 私有目录里 exec PRoot/node 的硬约束（29+ 会换 SELinux 域），不能动。
+  在 Android 15+ 上，target 28 仍按旧行为让 `setStatusBarColor` / `setNavigationBarColor` 生效；
+  `setNavigationBarDividerColor`（API 28）现在也跟随主题，三键导航的“任务栏”不再留一条对比色分隔线。
+  平板的系统任务栏 dock 由 SystemUI/Launcher 绘制，普通 App 没有改它颜色/主题的 API，
+  只能通过 inset 适配它的高度；设置页文案已改成“状态栏与导航栏（任务栏）”，避免误解。
 - **2026-11-03：本版在 10215 之后原地重发（版本名仍是 `1.2.2`，`versionCode` 10215 → 10216，
   旧 10215 作废）。** 新增生物识别、按对话授权、终端标签页中继与 7 个 AI 工具；装过 10215
   测试包的设备会看到一次「有新版本」。

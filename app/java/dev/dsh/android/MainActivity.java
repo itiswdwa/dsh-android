@@ -861,6 +861,14 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
                     withAlpha(pageScrimColor(dark), alpha)));
             window.setStatusBarColor(android.graphics.Color.TRANSPARENT);
             window.setNavigationBarColor(android.graphics.Color.TRANSPARENT);
+            // API 28's divider sits between the navigation bar and 3-button
+            // navigation. Left at its default it is a light line across the
+            // "taskbar" even when both sides are the page's colour; make it
+            // transparent so the acrylic strip is one surface (API 35 still
+            // honours this for targetSdk 28; it is only disabled for target 35+).
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                window.setNavigationBarDividerColor(android.graphics.Color.TRANSPARENT);
+            }
         } else {
             applySolidChrome(dark);
         }
@@ -926,6 +934,13 @@ public final class MainActivity extends Activity implements ServerBus.Listener, 
         window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(color));
         window.setStatusBarColor(color);
         window.setNavigationBarColor(color);
+        // The divider is part of Android's navigation bar chrome. Set it to the
+        // same colour as the bar so a 3-button "taskbar" does not keep a
+        // contrasting hairline after the page theme changes (API 28+; still
+        // effective on Android 15+ because this app targets 28).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.setNavigationBarDividerColor(color);
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) window.setBackgroundBlurRadius(0);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.setNavigationBarContrastEnforced(false);

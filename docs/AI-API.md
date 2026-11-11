@@ -4,9 +4,9 @@
 > 的高危能力授权与生物识别确认**。全部经控制桥（`127.0.0.1:8399`，`X-Dsh-Token`）；响应仍是
 > `{ok:true,...}` / `{ok:false,error,hint?,needs?}`。
 >
-> 版本：仍为 `1.2.2`，`VERSION_CODE=10217`（10216 / 10215 作废）。`window.DshAndroid.version`
+> 版本：仍为 `1.2.2`，`VERSION_CODE=10218`（10217 / 10216 / 10215 作废）。`window.DshAndroid.version`
 > 仍是 `2`——它描述的是 `/android/*` 那层接口面；AI 端点用 `GET /android/info` 的
-> `app.versionCode`（≥ `10217`）或直接探测路径判断（JSON 面的未知路径是 HTTP 200 + `{ok:false}`，不是 404）。
+> `app.versionCode`（≥ `10218`）或直接探测路径判断（JSON 面的未知路径是 HTTP 200 + `{ok:false}`，不是 404）。
 >
 > **边界**：授权只作用于 AI 入口（`/ai/android`、`/ai/terminal/tabs`）里**被用户设为高危**的能力；
 > 低危能力直接放行、不弹窗。直接拿桥令牌调 `/android/*` 的插件不受这层约束——桥令牌本来就是
@@ -315,6 +315,9 @@ host 插件 `plugin/dsh-plugin-android` 注册 8 个普通工具；`execute` 里
 
 ## 6. 变更记录
 
+- `1.2.2`（`versionCode` 10218，10217 / 10216 / 10215 作废）：**AI 契约未变**；本次只改了外壳的
+  agent `ui` 工具（`ui where`/`ui shot`）与编译 API（compileSdk 35，targetSdk 仍 28），
+  以及导航栏分隔线跟随主题。
 - `1.2.2`（`versionCode` 10217，10216 / 10215 作废）：新增 `/android/biometric`；AI 侧新增
   `/ai/android`、`/ai/consent`、`/ai/consent/revoke`、`/ai/consent/risk`、`/ai/terminal/tabs` 与
   页面中继 `/terminal/tabs/commands`、`/terminal/tabs/report`；**按对话授权只对用户勾选为高危的

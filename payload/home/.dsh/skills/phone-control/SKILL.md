@@ -98,20 +98,30 @@ shiz --status          # installed=true granted=true version=13
 ```sh
 ui status                # 无障碍开没开、悬浮球在不在、屏幕尺寸
 ui tree                  # 当前屏幕的可点/可输入控件（含坐标、控件 id、能做什么）
-ui click "发送"           # 按文字点，比坐标稳
-ui tap 540 1200          # 按坐标点（坐标从 ui tree 里取）
+ui where "发送"           # 自动截图，找到所有「发送」并按从上到下编号（带坐标）
+ui where "发送" --pick 2 --click   # 选第 2 处按控件点，失败自动按坐标点
+ui where --image /sdcard/Download/icon.png  # 卷积模板匹配找图标/图片
+ui where --image ... --pick 1 --tap # 按坐标点
+ui click "发送"           # 按文字点（默认第 1 处；--index N 选别处）
+ui tap 540 1200          # 按坐标点（坐标从 ui tree / ui where 取）
 ui type "晚饭吃啥"        # 往当前输入框输入（不经过输入法，中文安全）
 ui key back              # back / home / recents / notifications / lock
 ui swipe 540 1800 540 600 300
 ui open "微信"            # 按应用名或包名启动
+ui shot                  # 截屏存到 /sdcard/Download/dsh-shot-*.jpg
 ```
 
 用它的顺序建议：
 
-1. `ui tree` 看一眼，别凭猜测坐标；
-2. 有文字就用 `ui click "文字"`；
-3. 只有图标没有文字时（比如返回箭头、垃圾桶），用 `ui tree` 给出的坐标 `ui tap`；
-4. 点完再 `ui tree` 确认结果 —— 界面变了才说明点对了。
+1. `ui tree` 或 `ui where "文字"` 看一眼，别凭猜测坐标；
+2. 有完整文字就用 `ui where "文字" --pick N --click`（或 `ui click "文字"`）——
+   它只在**确实找到并点下去**时返回成功，找不到会以非 0 退出并打印原因；
+3. 只有图标没有文字时（发送箭头、垃圾桶、游戏/canvas 里的按钮）：先用 `ui shot` 截一张，
+   把图标裁成 PNG 放到 `/sdcard/Download/`，再 `ui where --image /sdcard/Download/icon.png`
+   做卷积模板匹配，选序号后 `--tap`；
+4. `ui where` 默认会把这次搜索用的截图存到 `/sdcard/Download/dsh-where-*.jpg`（只留最近 20 张），
+   可加 `--no-shot` 跳过截图；
+5. 点完再 `ui tree` / `ui where` 确认结果 —— 界面变了才说明点对了。
 
 **没开启时**：`ui status` 会显示 `无障碍服务：未开启`。这是用户手动开的开关（系统设置里），
 你需要让用户去 **DSH 应用 → 设置 → 安卓沙箱 → 手机助手 → 开启**，或者让应用弹出授权页：

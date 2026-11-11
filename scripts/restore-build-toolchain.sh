@@ -19,7 +19,7 @@
 # Usage: sh scripts/restore-build-toolchain.sh
 set -eu
 
-ANDROID_JAR_DIR=/tmp/platform/android-36
+ANDROID_JAR_DIR=/tmp/platform/android-35
 AAPT2_DIR=/tmp/aapt2dir
 R8_VERSION=9.5.26
 APKSIG_VERSION=9.4.1
@@ -50,14 +50,14 @@ DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=8 -y install \
 echo "== 安卓 SDK 组件（JAR/二进制，都是 /tmp 里的）"
 mkdir -p "$ANDROID_JAR_DIR" "$AAPT2_DIR"
 if [ ! -f "$ANDROID_JAR_DIR/android.jar" ]; then
-  curl -sSL --retry 5 -o /tmp/platform-36.zip \
-    https://dl.google.com/android/repository/platform-36_r02.zip
+  curl -sSL --retry 5 -o /tmp/platform-35.zip \
+    https://dl.google.com/android/repository/platform-35_r02.zip
   python3 - <<'PY'
 import os, zipfile
-z = zipfile.ZipFile("/tmp/platform-36.zip")
+z = zipfile.ZipFile("/tmp/platform-35.zip")
 name = [n for n in z.namelist() if n.endswith("android.jar")][0]
-os.makedirs("/tmp/platform/android-36", exist_ok=True)
-with z.open(name) as src, open("/tmp/platform/android-36/android.jar", "wb") as dst:
+os.makedirs("/tmp/platform/android-35", exist_ok=True)
+with z.open(name) as src, open("/tmp/platform/android-35/android.jar", "wb") as dst:
     dst.write(src.read())
 print("  android.jar ok")
 PY
