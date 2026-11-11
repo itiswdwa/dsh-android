@@ -120,6 +120,7 @@ function renderWhere(data) {
     lines.push(parts.filter(Boolean).join(" "));
   }
   if (data.message && !data.message.startsWith("找到 ")) lines.push(data.message);
+  if (data.warning) lines.push("警告：" + data.warning);
   if (data.count > 0 && !data.acted) {
     const action = data.kind === "image" ? "--tap" : "--click";
     lines.push("提示：ui where ... --pick 1 " + action + "（换序号选别处；--tap 永远按坐标点）");

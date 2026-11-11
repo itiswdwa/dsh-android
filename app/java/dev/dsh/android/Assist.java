@@ -237,6 +237,7 @@ public final class Assist extends AccessibilityService {
         try {
             List<Match> matches = new ArrayList<Match>();
             JSONObject preview = null;
+            String warning = "";
             boolean imageMode = !image.isEmpty();
 
             if (imageMode) {
@@ -257,8 +258,15 @@ public final class Assist extends AccessibilityService {
                 matches.addAll(textHits);
                 boolean needShot = wantShot || conv;
                 if (needShot) {
-                    captured = captureBitmap();
-                    if (conv) {
+                    // A screenshot is optional for a tree-only text search: Android
+                    // 8/9 (minSdk 26) cannot take one through accessibility, and a
+                    // throttled/secure window must not make the text locator fail.
+                    try {
+                        captured = captureBitmap();
+                    } catch (Throwable shotError) {
+                        warning = "截屏失败，已跳过截图/卷积：" + shotError.getMessage();
+                    }
+                    if (conv && captured != null) {
                         // If the tree knows one occurrence, its pixels are a far
                         // better template than any font guess: crop it and search
                         // for visually identical copies. Only when the tree has
@@ -368,6 +376,7 @@ public final class Assist extends AccessibilityService {
                 array.put(matches.get(i).toJson(i + 1));
             }
             answer.put("matches", array);
+            if (!warning.isEmpty()) answer.put("warning", warning);
             if (preview != null) answer.put("screenshot", preview);
             if (selected > 0) answer.put("selected", selected);
             if (acted) answer.put("acted", true);
