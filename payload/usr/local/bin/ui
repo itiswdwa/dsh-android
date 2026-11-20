@@ -4,7 +4,7 @@
  *
  *   ui status                      # 无障碍开没开、悬浮球在不在
  *   ui tree [--text]               # 当前屏幕上的可点/可输入控件（默认只列交互控件）
- *   ui where "发送"                # 自动截图 + 找到所有匹配，编号输出坐标
+ *   ui where "发送"                # 先查无障碍树，没有命中才截屏做像素匹配
  *   ui where --image /sdcard/x.png # 卷积模板匹配找图（图标/canvas/游戏）
  *   ui where ... --pick 2 --click  # 选第 2 处点击；--tap 按坐标点，--long 长按
  *   ui click "发送"                 # 按文字点，失败以非 0 退出（不再假报 ok）
@@ -21,6 +21,7 @@
  *
  * Exit codes: 0 ok, 1 the action failed (message on stderr), 2 bridge/protocol trouble.
  */
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
 const BRIDGE_EXIT = 2;
@@ -115,6 +116,7 @@ function renderWhere(data) {
     if (match.text) parts.push(JSON.stringify(match.text));
     parts.push(match.source || "");
     parts.push("score=" + match.score);
+    if (match.size) parts.push("字号=" + match.size);
     if (match.clickable) parts.push("clickable");
     if (match.exact) parts.push("exact");
     lines.push(parts.filter(Boolean).join(" "));
@@ -140,6 +142,127 @@ function renderTree(data) {
     lines.push(`  [${at}] ${node.class}${id} ${can} ${text}`.trimEnd());
   }
   return lines.join("\n");
+}
+
+/** Screenshot path: the accessibility service when it can, `shiz` otherwise. */
+async function captureScreen() {
+  try {
+    const shot = await call("/a11y/shot", { quality: 88 });
+    if (shot && shot.ok === true && shot.file) return shot.file;
+  } catch {
+    /* fall through to the shell capture */
+  }
+  const png = "/sdcard/Download/ui-shot-" + Date.now() + ".png";
+  try {
+    execFileSync("shiz", ["screencap", "-p", png], { encoding: "utf8" });
+    const jpg = png.replace(/\.png$/, ".jpg");
+    execFileSync("convert", [png, "-quality", "88", jpg], { encoding: "utf8" });
+    return jpg;
+  } catch (error) {
+    fail("截屏失败（无障碍和 shiz 都不可用）：" + (error && error.message ? error.message : String(error)));
+  }
+}
+
+/** One tap at a screen pixel: gesture when accessibility is on, `shiz input` otherwise. */
+async function tapAt(x, y) {
+  try {
+    const answer = await call("/a11y/tap", { x, y });
+    if (answer && answer.ok === true) return "已点击";
+  } catch {
+    /* fall through */
+  }
+  try {
+    execFileSync("shiz", ["input", "tap", String(x), String(y)], { encoding: "utf8" });
+    return "已点击（shiz）";
+  } catch (error) {
+    fail("点击失败：" + (error && error.message ? error.message : String(error)));
+  }
+}
+
+/** Capture the screen, then locate the characters in it with the pixel matcher. */
+/** Pick one match and tap it; shared by both locators. */
+async function actOnMatches(data, text, parsed) {
+  const action = parsed.values["--click"] ? "click"
+    : parsed.values["--tap"] ? "tap"
+    : parsed.values["--long"] ? "long"
+    : parsed.values["--action"] ? String(parsed.values["--action"]) : "none";
+  if (action === "none") return data;
+  const matches = data.matches ?? [];
+  if (matches.length === 0) fail("没有找到「" + text + "」，无法点击");
+  let pick = parsed.values["--pick"] ? number(parsed.values["--pick"], "--pick") : 0;
+  if (pick <= 0) {
+    if (matches.length !== 1) {
+      fail("找到 " + matches.length + " 处，请用 --pick 指定第几处（1 起）");
+    }
+    pick = 1;
+  }
+  if (pick > matches.length) fail("--pick 超出范围：只有 " + matches.length + " 处");
+  const match = matches[pick - 1];
+  if (action === "long") {
+    try {
+      execFileSync("shiz", ["input", "swipe", String(match.x), String(match.y),
+        String(match.x), String(match.y), "700"], { encoding: "utf8" });
+      console.log("已长按 " + match.x + "," + match.y);
+    } catch (error) {
+      fail("长按失败：" + (error && error.message ? error.message : String(error)));
+    }
+  } else {
+    console.log(await tapAt(match.x, match.y));
+  }
+  data.acted = true;
+  data.selected = pick;
+  data.message = "已点击「" + text + "」@" + match.x + "," + match.y;
+  return data;
+}
+
+/** Tree first; the pixel matcher only runs when the tree has no hit. */
+async function whereByText(text, parsed) {
+  const max = parsed.values["--max"] ? number(parsed.values["--max"], "--max") : 8;
+  if (!parsed.values["--pixels"]) {
+    let tree = null;
+    try {
+      const answer = await call("/a11y/where", { text, max });
+      if (answer && answer.ok === true) tree = answer;
+    } catch {
+      tree = null;
+    }
+    if (tree && (tree.matches ?? []).length > 0) {
+      tree.kind = "text";
+      tree.message = tree.message || ("找到 " + tree.matches.length + " 处");
+      return renderWhere(await actOnMatches(tree, text, parsed));
+    }
+  }
+  return renderWhere(await actOnMatches(await whereByPixels(text, parsed), text, parsed));
+}
+
+/** Capture the screen, then locate the characters in it with the pixel matcher. */
+async function whereByPixels(text, parsed) {
+  const shotFile = await captureScreen();
+  const minScore = parsed.values["--min-score"] ? number(parsed.values["--min-score"], "--min-score") : 0.58;
+  const max = parsed.values["--max"] ? number(parsed.values["--max"], "--max") : 8;
+  const args = ["--screen", shotFile, "--text", text,
+    "--min-score", String(minScore), "--max", String(max)];
+  if (parsed.values["--size"]) {
+    const size = number(parsed.values["--size"], "--size");
+    args.push("--min-size", String(size), "--max-size", String(size + 2));
+  }
+  let raw;
+  try {
+    raw = execFileSync("uitext", args, { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
+  } catch (error) {
+    // No native matcher in this guest: report that instead of inventing a hit.
+    fail("文字匹配失败：" + (error && error.message ? error.message : String(error)));
+  }
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    fail("匹配器返回的不是 JSON：" + String(raw).slice(0, 200));
+  }
+  data.kind = "text";
+  data.query = text;
+  data.screenshot = { file: shotFile };
+  return data;
 }
 
 async function main() {
@@ -219,12 +342,22 @@ async function main() {
     }
     case "where": {
       const parsed = parseArgs(rest,
-        ["--image", "--pick", "--max", "--threshold", "--size", "--scale", "--action"],
-        ["--exact", "--conv", "--no-shot", "--no-save", "--click", "--tap", "--long", "--json"]);
+        ["--image", "--pick", "--max", "--threshold", "--size", "--scale", "--action", "--min-score"],
+        ["--exact", "--conv", "--no-shot", "--no-save", "--click", "--tap", "--long", "--json", "--tree", "--pixels"]);
       const text = parsed.rest.join(" ").trim();
       const image = parsed.values["--image"] ? String(parsed.values["--image"]).trim() : "";
       if (!text && !image) fail('用法：ui where "文字" [--pick N --click] 或 ui where --image <模板图片>');
       if (text && image) fail("文字和图片只能选一个（--image 或文字）");
+      // Text is looked up in the accessibility tree first — it is exact and
+      // instant — and only when the tree has no hit do we fall back to the
+      // pixels: the string is rendered with the system CJK font and correlated
+      // over a screenshot, which is what finds labels inside a canvas, a game or
+      // a WebView that exposes no nodes. --tree keeps it tree-only, --pixels
+      // skips the tree.
+      if (text && !parsed.values["--tree"]) {
+        console.log(await whereByText(text, parsed));
+        return;
+      }
       const body = {};
       if (image) body.image = image;
       else body.text = text;
@@ -270,9 +403,10 @@ async function main() {
 
   ui status                      当前状态（服务/悬浮窗/麦克风/屏幕尺寸）
   ui tree [--text]               屏幕上的控件；--text 连纯文本一起列
-  ui where "发送"                 自动截图 + 找到所有出现位置，按从上到下编号
+  ui where "发送"                 先查无障碍树；树里没有才截屏按像素找这几个字
+  ui where "发送" --pick 2 --click  选第 2 处按坐标点
+  ui where "发送" --tree          只查无障碍树   --pixels  跳过树，只做像素匹配
   ui where --image /sdcard/x.png  卷积模板匹配找图（图标/canvas/游戏）
-  ui where "发送" --pick 2 --click  选第 2 处点击（失败会按坐标点）
   ui click "发送" [--index N]     按文字点（默认第 1 处；--tap 直接按坐标）
   ui tap X Y                     按坐标点（坐标从 tree/where 取）
   ui type "内容"                  输入到当前输入框

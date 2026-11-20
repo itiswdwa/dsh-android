@@ -32,6 +32,23 @@ _这一版是**应用版本升级**，主题是**把 Android 能力交给插件�
 > 无障碍服务声明、系统 `BiometricPrompt`），热更新包送不过去；热包也不跨应用版本线，所以这一版只随
 > APK 下发。沙箱运行时仍是 `t3`，这一版不换运行时线。
 
+### 热更新 1.2.2-t3-sp3（2026-11-20）
+
+_热包，不换 APK。`ui where "文字"` 变成**两级查找**：先查无障碍树，树里没有命中才按像素找字。_
+
+- 新增 `uitext`（`native/uitext.c`，编进热包 `usr/local/bin/uitext`）：用 guest 里的
+  Noto Sans CJK 把要查的字渲染成模板，在截屏上做整窗归一化互相关；先 1/4 降采样 + 积分图粗筛，
+  再把每个字号最好的几处拿回原分辨率按 ±2px 字号细化，3200px 宽的屏上一趟约 0.3–1 秒；
+- `ui where "文字"` 先查无障碍树（精确、即时），**树里一处都没有**时才走它：返回每处的坐标、
+  包围盒、score 和实际字号；画在 canvas、图片、视频、状态栏或没有文本节点的 WebView 里的字
+  靠这一步找到；`--pick N --click/--tap` 直接按坐标点；
+- `ui where --tree` 只查树，`--pixels` 跳过树只做像素匹配；
+- 截屏与点击在无障碍不可用时回退到 `shiz screencap` / `shiz input tap`，
+  所以这条链路不再必须打开无障碍服务；
+- 自定义数据不依赖新增系统库：`uitext` 只链 `libfreetype`、`libjpeg`（rootfs 已有），
+  构建：`sh scripts/build_uitext.sh`（需要 `libfreetype-dev`、`libjpeg-dev`）；
+- 技能 `phone-control` 同步改写：先 `ui where "文字"`，要结构信息再看 `ui tree`。
+
 ### 热更新 1.2.2-t3-sp1（2026-11-06）
 
 _热包，不换 APK。这一版把 AI 的「终端」能力从“只能开/关页面标签页”扩到“能执行命令、

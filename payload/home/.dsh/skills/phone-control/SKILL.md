@@ -98,8 +98,10 @@ shiz --status          # installed=true granted=true version=13
 ```sh
 ui status                # 无障碍开没开、悬浮球在不在、屏幕尺寸
 ui tree                  # 当前屏幕的可点/可输入控件（含坐标、控件 id、能做什么）
-ui where "发送"           # 自动截图，找到所有「发送」并按从上到下编号（带坐标）
-ui where "发送" --pick 2 --click   # 选第 2 处按控件点，失败自动按坐标点
+ui where "发送"           # 先查无障碍树；树里没有命中，才截屏按像素找这几个字
+ui where "发送" --pick 2 --click   # 选第 2 处点击（按坐标点）
+ui where "发送" --tree    # 只查树（要控件 id / 可点性时）
+ui where "发送" --pixels  # 跳过树，直接截屏做像素匹配（画在 canvas/图片里的字）
 ui where --image /sdcard/Download/icon.png  # 卷积模板匹配找图标/图片
 ui where --image ... --pick 1 --tap # 按坐标点
 ui click "发送"           # 按文字点（默认第 1 处；--index N 选别处）
@@ -113,13 +115,15 @@ ui shot                  # 截屏存到 /sdcard/Download/dsh-shot-*.jpg
 
 用它的顺序建议：
 
-1. `ui tree` 或 `ui where "文字"` 看一眼，别凭猜测坐标；
-2. 有完整文字就用 `ui where "文字" --pick N --click`（或 `ui click "文字"`）——
+1. `ui where "文字"` 看一眼：先查无障碍树（准、快），树里没有才渲染这些字做像素匹配
+   —— 画在 canvas / 图片 / 视频 / 状态栏里的字也能找到；要控件 id、可点性、输入框时用 `ui tree`；
+2. 找到后 `ui where "文字" --pick N --click`——
    它只在**确实找到并点下去**时返回成功，找不到会以非 0 退出并打印原因；
 3. 只有图标没有文字时（发送箭头、垃圾桶、游戏/canvas 里的按钮）：先用 `ui shot` 截一张，
    把图标裁成 PNG 放到 `/sdcard/Download/`，再 `ui where --image /sdcard/Download/icon.png`
    做卷积模板匹配，选序号后 `--tap`；
-4. `ui where` 默认会把这次搜索用的截图存到 `/sdcard/Download/dsh-where-*.jpg`（只留最近 20 张），
+4. `ui where` 每次会截一张图并留在 `/sdcard/Download/dsh-shot-*.jpg`（`--min-score` 可调严格度，
+   默认 0.58；找不到时先降低它，再考虑图标模板匹配），
    可加 `--no-shot` 跳过截图；
 5. 点完再 `ui tree` / `ui where` 确认结果 —— 界面变了才说明点对了。
 
@@ -127,6 +131,10 @@ ui shot                  # 截屏存到 /sdcard/Download/dsh-shot-*.jpg
 你需要让用户去 **DSH 应用 → 设置 → 安卓沙箱 → 手机助手 → 开启**，或者让应用弹出授权页：
 `ui permission a11y`（同理 `ui permission overlay` 是悬浮窗、`ui permission mic` 是麦克风）。
 不要假装能自己拿到这个权限。
+
+**`ui where` 的两级查找**：先走无障碍树（精确、即时，长段落会是大框、中心不一定是字），
+树里一处都没有时才渲染字符做像素相关（canvas、图片、状态栏这些树里没有的字靠它）。
+`--tree` 只查树，`--pixels` 只做像素匹配。
 
 **两条通道怎么选**：装 APK、`pm`、`settings`、截屏、读通知 → `shiz`；点界面上按钮、读界面文字、
 在别的应用里打字 → `ui`。两边都没有时再考虑 `am start`（`shiz`）。
